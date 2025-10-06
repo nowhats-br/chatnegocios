@@ -25,10 +25,101 @@ WEBHOOK_DIR="$APP_DIR/server/webhook"
 WEBHOOK_PORT=3001
 WEBHOOK_PATH="/api/evolution/webhook"
 
+# Modo rápido: executar apenas correção de SSL/Nginx
+MODE=${1:-}
+if [[ "$MODE" == "ssl-only" || "$MODE" == "--ssl-only" ]]; then
+  echo "[MODO] ssl-only: executando apenas correção de SSL/Nginx (pula etapas 1–7)."
+
+  # Garantir dependências mínimas
+  apt-get update -y || true
+  apt-get install -y nginx certbot python3-certbot-nginx psmisc || true
+
+  NGINX_SITE="/etc/nginx/sites-available/${DOMAIN}.conf"
+  NGINX_LINK="/etc/nginx/sites-enabled/${DOMAIN}.conf"
+
+  # Remover site padrão e habilitar serviço
+  rm -f /etc/nginx/sites-enabled/default || true
+  systemctl enable nginx || true
+  systemctl start nginx || true
+
+  echo "\n[SSL] Emitindo certificado com Certbot (plugin Nginx, com fallback)."
+  # Se Apache estiver ocupando a porta 80, desligar
+  if systemctl is-active --quiet apache2; then
+    echo "[INFO] Apache2 ativo. Desativando para liberar porta 80..."
+    systemctl stop apache2 || true
+    systemctl disable apache2 || true
+  fi
+
+  # Tentar emitir via plugin Nginx
+  if certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive --redirect; then
+    systemctl reload nginx || true
+  else
+    echo "[AVISO] Falha com plugin Nginx. Tentando modo standalone..."
+    systemctl stop nginx || true
+    fuser -k 80/tcp || true
+
+    if certbot certonly --standalone -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive; then
+      SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+      SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+
+      # Recriar configuração Nginx com SSL e redirecionamento
+      cat > "$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate ${SSL_CERT};
+    ssl_certificate_key ${SSL_KEY};
+
+    root ${WEB_DIR};
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ${WEBHOOK_PATH} {
+        proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+      ln -sf "$NGINX_SITE" "$NGINX_LINK"
+      rm -f /etc/nginx/sites-enabled/default || true
+      if ! nginx -t; then
+        echo "[ERRO] Configuração Nginx/SSL inválida. Verifique $NGINX_SITE e certificados." >&2
+        journalctl -u nginx --no-pager -n 50 || true
+        exit 1
+      fi
+      systemctl start nginx || systemctl restart nginx || true
+    else
+      echo "[ERRO] Falha ao obter certificado SSL em modo standalone. Consulte /var/log/letsencrypt/letsencrypt.log" >&2
+      exit 1
+    fi
+  fi
+
+  echo "\n==== Correção SSL concluída ===="
+  echo "URL de acesso: https://${DOMAIN}/"
+  echo "Endpoint de webhook: https://${DOMAIN}${WEBHOOK_PATH}"
+  exit 0
+fi
+
 echo "\n[1/8] Atualizando pacotes e instalando dependências..."
 apt-get update -y
 apt-get upgrade -y || true
-apt-get install -y curl ca-certificates gnupg lsb-release build-essential ufw nginx git || true
+apt-get install -y curl ca-certificates gnupg lsb-release build-essential ufw nginx git psmisc || true
 
 echo "\n[2/8] Instalando Node.js LTS e NPM..."
 # Remover pacotes conflitantes (ex.: Node 12/libnode-dev do Ubuntu)
@@ -188,8 +279,75 @@ else
 fi
 
 echo "\n[8/8] Emitindo certificado SSL com Let's Encrypt..."
-certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive --redirect || true
-systemctl reload nginx || true
+# Garantir que nenhum outro servidor esteja ocupando a porta 80 (ex.: Apache)
+if systemctl is-active --quiet apache2; then
+  echo "[INFO] Apache2 está ativo na porta 80. Desativando para continuar com Nginx/Certbot..."
+  systemctl stop apache2 || true
+  systemctl disable apache2 || true
+fi
+
+# Tentar emitir certificado usando o plugin Nginx (com redirecionamento automático)
+if certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive --redirect; then
+  systemctl reload nginx || true
+else
+  echo "[AVISO] Falha ao emitir certificado com o plugin Nginx. Tentando fallback em modo standalone..."
+  # Parar Nginx para liberar a porta 80 ao standalone
+  systemctl stop nginx || true
+  # Liberar porta 80 (se algum processo desconhecido estiver prendendo)
+  fuser -k 80/tcp || true
+
+  if certbot certonly --standalone -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive; then
+    SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+
+    # Recriar configuração Nginx com SSL e redirecionamento 80->443
+    cat > "$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate ${SSL_CERT};
+    ssl_certificate_key ${SSL_KEY};
+
+    root ${WEB_DIR};
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy do webhook para Node local
+    location ${WEBHOOK_PATH} {
+        proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+    ln -sf "$NGINX_SITE" "$NGINX_LINK"
+    rm -f /etc/nginx/sites-enabled/default || true
+    if ! nginx -t; then
+      echo "[ERRO] Configuração Nginx com SSL inválida. Verifique o arquivo $NGINX_SITE e os certificados."
+      journalctl -u nginx --no-pager -n 50 || true
+      exit 1
+    fi
+    systemctl start nginx || systemctl restart nginx || true
+  else
+    echo "[ERRO] Falha ao obter certificado SSL com Certbot (modo standalone)." >&2
+    echo "Consulte: /var/log/letsencrypt/letsencrypt.log" >&2
+  fi
+fi
 
 echo "\nConfigurando serviço do webhook com PM2..."
 cd "$WEBHOOK_DIR"
