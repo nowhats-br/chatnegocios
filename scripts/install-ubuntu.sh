@@ -31,22 +31,32 @@ apt-get upgrade -y || true
 apt-get install -y curl ca-certificates gnupg lsb-release build-essential ufw nginx git || true
 
 echo "\n[2/8] Instalando Node.js LTS e NPM..."
-# Tenta via NodeSource
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-  apt-get install -y nodejs
-fi
-# Fallback: pacote npm do Ubuntu
+# Remover pacotes conflitantes (ex.: Node 12/libnode-dev do Ubuntu)
+apt-get remove -y nodejs npm libnode-dev || true
+apt-get purge -y nodejs npm libnode-dev || true
+apt-get autoremove -y || true
+
+# Instalar via NodeSource (LTS)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+apt-get install -y nodejs || true
+
+# Se npm ainda não estiver presente, instalar via pacote do Ubuntu
 if ! command -v npm >/dev/null 2>&1; then
   apt-get install -y npm || true
 fi
-# Fallback final: Snap (se disponível)
+
+# Fallback final: Snap (se disponível) se node/npm continuarem ausentes
 if (! command -v node >/dev/null 2>&1) || (! command -v npm >/dev/null 2>&1); then
   if command -v snap >/dev/null 2>&1; then
     snap install node --classic || true
   fi
 fi
-# Verificação final
+
+# Reparar instalação se dpkg estiver com pendências
+apt-get -f install -y || true
+dpkg --configure -a || true
+
+# Verificação final e ferramentas globais
 if ! command -v npm >/dev/null 2>&1; then
   echo "[ERRO] npm não foi instalado. Verifique rede/repos e tente novamente." >&2
   exit 1
