@@ -8,7 +8,7 @@ export const API_ENDPOINTS = {
   INSTANCE_CREATE: '/instance/create',
 
   /**
-   * Endpoint to get the connection status for a specific instance.
+   * Endpoint to connect and get QR code for a specific instance.
    * @param instanceName The name of the WhatsApp instance.
    */
   INSTANCE_CONNECT: (instanceName: string) => `/instance/connect/${instanceName}`,
@@ -18,6 +18,18 @@ export const API_ENDPOINTS = {
    * @param instanceName The name of the WhatsApp instance.
    */
   INSTANCE_QR_CODE: (instanceName: string) => `/instance/qrCode/${instanceName}`,
+
+  /**
+   * Endpoint to get instance status and information.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_STATUS: (instanceName: string) => `/instance/fetchInstances/${instanceName}`,
+
+  /**
+   * Endpoint to delete a specific instance.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_DELETE: (instanceName: string) => `/instance/delete/${instanceName}`,
 
   /**
    * Endpoint for sending a text message.
