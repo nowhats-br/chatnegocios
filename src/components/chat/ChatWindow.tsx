@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Conversation, Message, QuickResponse } from '@/types/database';
 import { toast } from 'sonner';
-import { User, MoreVertical, Loader2, FileText, Download, CheckCircle, MessageCircle } from 'lucide-react';
+import { User, MoreVertical, Loader2, FileText, Download } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import MessageInput from './MessageInput';
 import { useAuth } from '@/contexts/AuthContext';

@@ -29,13 +29,15 @@ export function useApi<T>(): UseApiReturn<T> {
     }
 
     try {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'apikey': apiKey } : {}),
+        ...(options.headers || {}),
+      };
+
       const response = await fetch(`${apiUrl}${endpoint}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': apiKey,
-          ...options.headers,
-        },
+        headers,
       });
 
       if (!response.ok) {

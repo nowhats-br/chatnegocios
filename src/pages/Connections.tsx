@@ -17,7 +17,6 @@ import AlertDialog from '@/components/ui/AlertDialog';
 import { 
   EvolutionInstanceCreateRequest, 
   EvolutionInstanceCreateResponse, 
-  EvolutionInstanceConnectResponse,
   STATUS_CONFIG,
   STATUS_MAPPING,
 } from '@/types/evolution-api';
