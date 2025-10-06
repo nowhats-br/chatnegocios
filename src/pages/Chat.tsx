@@ -1,0 +1,278 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Conversation, Product, ConversationStatus, MessageType } from '@/types/database';
+import { toast } from 'sonner';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ShoppingCart, Loader2, CheckCircle } from 'lucide-react';
+import Button from '@/components/ui/Button';
+import ConversationList from '@/components/chat/ConversationList';
+import ChatWindow from '@/components/chat/ChatWindow';
+import { formatCurrency } from '@/lib/utils';
+import { useApi } from '@/hooks/useApi';
+import { useAuth } from '@/contexts/AuthContext';
+import { API_ENDPOINTS } from '@/lib/apiEndpoints';
+
+const Chat: React.FC = () => {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isSalesSidebarOpen, setSalesSidebarOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const messageApi = useApi();
+  const { user } = useAuth();
+  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
+
+  const fetchConversations = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('conversations')
+      .select(`
+        *,
+        contacts (
+          name,
+          avatar_url,
+          phone_number
+        )
+      `)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      toast.error('Erro ao buscar conversas', { description: error.message });
+    } else {
+      setConversations(data as Conversation[]);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+
+  const fetchProducts = useCallback(async () => {
+    setLoadingProducts(true);
+    const { data, error } = await supabase.from('products').select('*').order('name');
+    if (error) {
+      toast.error('Erro ao buscar produtos', { description: error.message });
+    } else {
+      setProducts(data);
+    }
+    setLoadingProducts(false);
+  }, []);
+
+  const sendMessage = async (content: string, type: MessageType) => {
+    if (!activeConversation || !user) {
+        toast.error("Nenhuma conversa ativa selecionada.");
+        return;
+    }
+
+    // 1. Save message to DB
+    const { error: msgError } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: activeConversation.id,
+        content: content,
+        sender_is_user: true,
+        message_type: type,
+        user_id: user.id
+      })
+      .select()
+      .single();
+
+    if (msgError) {
+      toast.error("Erro ao salvar mensagem no banco.", { description: msgError.message });
+      return;
+    }
+
+    // 2. Get connection data
+    if (!activeConversation.connection_id || !activeConversation.contacts?.phone_number) {
+        toast.error("Dados da conversa incompletos para envio.");
+        return;
+    }
+
+    const { data: connectionData, error: connError } = await supabase
+        .from('connections')
+        .select('instance_name')
+        .eq('id', activeConversation.connection_id)
+        .single();
+    
+    if (connError || !connectionData) {
+        toast.error("Erro ao buscar dados da conexão.", { description: connError?.message });
+        return;
+    }
+
+    // 3. Prepare payload and send via API
+    const instanceName = connectionData.instance_name;
+    const to = activeConversation.contacts.phone_number;
+    let endpoint: string;
+    let body: any;
+
+    switch (type) {
+        case 'text':
+            endpoint = API_ENDPOINTS.SEND_TEXT(instanceName);
+            body = { number: to, textMessage: { text: content } };
+            break;
+        case 'image':
+            endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
+            body = { number: to, mediaMessage: { mediatype: 'image', media: content, caption: '' } };
+            break;
+        case 'file':
+            endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
+            body = { number: to, mediaMessage: { mediatype: 'document', media: content, fileName: content.split('/').pop() } };
+            break;
+        default:
+            toast.error("Tipo de mensagem não suportado.");
+            return;
+    }
+
+    await messageApi.request(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(body)
+    });
+
+    if(messageApi.error) {
+        toast.error("Falha ao enviar mensagem via API", { description: messageApi.error });
+    }
+  };
+
+  const handleSendAttachment = async (file: File) => {
+    if (!user) return;
+    const toastId = toast.loading('Enviando anexo...');
+
+    try {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('attachments')
+            .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+            .from('attachments')
+            .getPublicUrl(fileName);
+
+        if (!publicUrl) throw new Error("Não foi possível obter a URL pública do arquivo.");
+
+        const messageType: MessageType = file.type.startsWith('image/') ? 'image' : 'file';
+        
+        await sendMessage(publicUrl, messageType);
+
+        toast.success('Anexo enviado com sucesso!', { id: toastId });
+
+    } catch (error: any) {
+        toast.error('Falha no envio do anexo', { id: toastId, description: error.message });
+    }
+  };
+
+
+  const handleSendProduct = (product: Product) => {
+    if (!activeConversation) return;
+    const messageContent = `Olá! Segue o produto que você se interessou:\n\n*${product.name}*\n${product.description || ''}\n\n*Preço: ${formatCurrency(product.price)}*`;
+    sendMessage(messageContent, 'text');
+    setSalesSidebarOpen(false);
+    toast.success(`Produto "${product.name}" enviado na conversa.`);
+  };
+
+  const handleResolveConversation = async () => {
+    if (!activeConversation) return;
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ status: 'resolved' })
+      .eq('id', activeConversation.id);
+    
+    if (error) {
+      toast.error('Erro ao resolver conversa', { description: error.message });
+    } else {
+      toast.success('Conversa marcada como resolvida!');
+      setConversations(prev => prev.filter(c => c.id !== activeConversation.id));
+      setActiveConversation(null);
+    }
+  };
+
+
+  useEffect(() => {
+    if (isSalesSidebarOpen && products.length === 0) {
+      fetchProducts();
+    }
+  }, [isSalesSidebarOpen, products.length, fetchProducts]);
+
+  const filteredConversations = conversations.filter(c => c.status === activeFilter);
+
+  return (
+    <div className="flex h-[calc(100vh-110px)] bg-card border rounded-lg overflow-hidden">
+      <ConversationList
+        conversations={filteredConversations}
+        activeConversationId={activeConversation?.id}
+        onSelectConversation={setActiveConversation}
+        loading={loading}
+        activeFilter={activeFilter}
+        onFilterChange={setActiveFilter}
+      />
+
+      <div className="flex-1 flex flex-col bg-chat-bg dark:bg-chat-bg-dark">
+        {activeConversation ? (
+          <ChatWindow
+            key={activeConversation.id}
+            conversation={activeConversation}
+            onSendMessage={(content) => sendMessage(content, 'text')}
+            onSendAttachment={handleSendAttachment}
+            headerActions={
+              <div className="flex items-center space-x-2">
+                <Button variant="outline" size="sm" onClick={handleResolveConversation}>
+                  <CheckCircle className="mr-2 h-4 w-4"/> Resolver
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setSalesSidebarOpen(!isSalesSidebarOpen)}>
+                  <ShoppingCart className="mr-2 h-4 w-4"/> Iniciar Venda
+                </Button>
+              </div>
+            }
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <img src="/placeholder-chat.svg" alt="Selecione uma conversa" className="w-64 h-64" />
+            <h2 className="mt-4 text-2xl font-semibold">Selecione uma conversa</h2>
+            <p className="text-muted-foreground">Escolha um dos seus contatos para começar a conversar.</p>
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {isSalesSidebarOpen && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 350, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="border-l flex flex-col bg-card"
+          >
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold">Catálogo de Produtos</h3>
+              <Button variant="ghost" size="icon" onClick={() => setSalesSidebarOpen(false)}>X</Button>
+            </div>
+            <div className="p-4">
+               <input type="text" placeholder="Buscar produto..." className="w-full px-3 py-2 rounded-lg bg-secondary border focus:outline-none focus:border-primary"/>
+            </div>
+            <div className="flex-1 p-4 overflow-y-auto space-y-3">
+              {loadingProducts ? (
+                <div className="flex justify-center items-center h-full"><Loader2 className="h-6 w-6 animate-spin text-primary"/></div>
+              ) : products.map(product => (
+                <div key={product.id} onClick={() => handleSendProduct(product)} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-accent cursor-pointer">
+                  <img src={product.image_url || `https://img-wrapper.vercel.app/image?url=https://placehold.co/48x48/cccccc/FFFFFF/png?text=${product.name.charAt(0)}`} alt={product.name} className="w-12 h-12 rounded-md object-cover"/>
+                  <div className="flex-1">
+                    <p className="font-medium">{product.name}</p>
+                    <p className="text-sm text-primary font-semibold">{formatCurrency(product.price)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default Chat;

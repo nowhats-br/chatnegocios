@@ -1,0 +1,6 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+bash git rm -r --cached
+bash git add
+bash git commit -m "feat: Initial project structure for EvoChat" 
+bash git push origin main --force
