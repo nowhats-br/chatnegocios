@@ -30,9 +30,27 @@ apt-get update -y
 apt-get upgrade -y || true
 apt-get install -y curl ca-certificates gnupg lsb-release build-essential ufw nginx git || true
 
-echo "\n[2/8] Instalando Node.js LTS (via NodeSource)..."
-curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-apt-get install -y nodejs || true
+echo "\n[2/8] Instalando Node.js LTS e NPM..."
+# Tenta via NodeSource
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+  apt-get install -y nodejs
+fi
+# Fallback: pacote npm do Ubuntu
+if ! command -v npm >/dev/null 2>&1; then
+  apt-get install -y npm || true
+fi
+# Fallback final: Snap (se disponível)
+if (! command -v node >/dev/null 2>&1) || (! command -v npm >/dev/null 2>&1); then
+  if command -v snap >/dev/null 2>&1; then
+    snap install node --classic || true
+  fi
+fi
+# Verificação final
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[ERRO] npm não foi instalado. Verifique rede/repos e tente novamente." >&2
+  exit 1
+fi
 npm install -g npm@latest || true
 npm install -g pm2 || true
 
@@ -47,7 +65,9 @@ echo "Firewall configurado (se ativo)."
 echo "\n[5/8] Instalando e construindo o frontend..."
 cd "$APP_DIR"
 if [[ -f yarn.lock ]]; then
-  corepack enable || true
+  if ! command -v yarn >/dev/null 2>&1; then
+    npm install -g yarn || true
+  fi
   if command -v yarn >/dev/null 2>&1; then
     yarn install --frozen-lockfile || yarn install
     yarn build
