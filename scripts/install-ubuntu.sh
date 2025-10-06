@@ -168,8 +168,24 @@ server {
 EOF
 
 ln -sf "$NGINX_SITE" "$NGINX_LINK"
-nginx -t
-systemctl reload nginx || systemctl restart nginx
+# Remover site padrão para evitar conflitos
+rm -f /etc/nginx/sites-enabled/default || true
+
+# Validar configuração do Nginx antes de aplicar
+if ! nginx -t; then
+  echo "[ERRO] Configuração do Nginx inválida. Saída do teste:" >&2
+  nginx -t || true
+  journalctl -u nginx --no-pager -n 50 || true
+  exit 1
+fi
+
+# Garantir serviço habilitado e em execução
+systemctl enable nginx || true
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx || systemctl restart nginx || true
+else
+  systemctl start nginx || systemctl restart nginx || true
+fi
 
 echo "\n[8/8] Emitindo certificado SSL com Let's Encrypt..."
 certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive --redirect || true
