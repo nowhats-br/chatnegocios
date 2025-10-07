@@ -57,3 +57,70 @@ Após concluir, o script mostra:
 
 Lembrete:
 - Use o mesmo endpoint em `VITE_EVOLUTION_WEBHOOK_URL` e no Manager Evolution (events/webhook).
+
+Instalação via EasyPanel (1 App)
+--------------------------------
+- Objetivo: um único app que serve a SPA (frontend) e recebe webhooks no mesmo container.
+- O EasyPanel cuidará de domínio e SSL. O container roda apenas HTTP (porta interna 3000).
+
+Passo a passo
+- Prepare o repositório (já está pronto):
+  - `Dockerfile` multi-stage para build e execução.
+  - `server/app.js` serve `dist` e expõe `WEBHOOK_PATH`.
+  - Script de inicialização: `npm run start`.
+- No EasyPanel:
+  - Crie um novo App do tipo Dockerfile.
+  - Aponte para este repositório e branch desejada.
+  - Dockerfile path: `Dockerfile`.
+  - Configure Build Args (usados na etapa de build do Vite):
+    - `VITE_SUPABASE_URL`: URL do seu projeto Supabase.
+    - `VITE_SUPABASE_ANON_KEY`: Chave anon do Supabase.
+    - `VITE_EVOLUTION_API_URL`: URL base do seu provedor Evolution.
+    - `VITE_EVOLUTION_API_KEY`: Chave da API do provedor.
+    - `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: opcional (ex.: `/instance/qrCode/{instanceName}`).
+    - `VITE_EVOLUTION_WEBHOOK_URL`: `https://seu-dominio.com/api/evolution/webhook`.
+  - Configure Environment (runtime):
+    - `PORT`: `3000` (opcional; já definido no Dockerfile).
+    - `WEBHOOK_PORT`: `3000` (opcional; já definido no Dockerfile).
+    - `WEBHOOK_PATH`: `/api/evolution/webhook`.
+  - Porta interna do container: `3000`.
+  - Vincule o domínio ao app e ative SSL no EasyPanel.
+  - Deploy (Build + Run).
+- Após o deploy:
+  - Acesse `https://seu-dominio.com/` para conferir a SPA.
+  - Webhook público: `https://seu-dominio.com/api/evolution/webhook`.
+  - Healthcheck: `https://seu-dominio.com/health`.
+
+Notas importantes
+- Variáveis `VITE_*` são incorporadas no build; altere os Build Args e faça novo deploy se precisar atualizar.
+- O EasyPanel faz o TLS offload; o container expõe apenas HTTP.
+- Se preferir separar frontend e webhook, crie 2 apps e aponte rotas distintas, mas o modelo acima foca em 1 app.
+
+Passo a passo com seus valores (nowhats)
+---------------------------------------
+- Domínio do app: `https://chat.nowhats.com.br`.
+- Webhook público: `https://chat.nowhats.com.br/api/evolution/webhook`.
+- Manager Evolution: informar o webhook exatamente como acima.
+
+- Build Args (Vite):
+  - `VITE_EVOLUTION_API_URL`: `https://evo.nowhats.com.br`.
+  - `VITE_EVOLUTION_WEBHOOK_URL`: `https://chat.nowhats.com.br/api/evolution/webhook`.
+  - `VITE_EVOLUTION_API_KEY`: `XZ3calYj8iGSF0KxuSQvAwkXFZVDMQjn`.
+  - `VITE_SUPABASE_ANON_KEY`: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0anhramx1dWZnZnFndW9laW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTMwMTIsImV4cCI6MjA3NDcyOTAxMn0.mlZuJLhMUQGeQC0CPIqrFSr1CFC2dA8Muhdpw08cidI`.
+  - `VITE_SUPABASE_URL`: `https://rtjxkjluufgfqguoeinn.supabase.co`.
+
+- Runtime (opcional, já default):
+  - `PORT`: `3000`.
+  - `WEBHOOK_PATH`: `/api/evolution/webhook`.
+
+- Deploy:
+  - Vincule `chat.nowhats.com.br` ao app no EasyPanel e ative SSL.
+  - Build + Run com os valores acima.
+
+- Testes rápidos:
+  - SPA: `https://chat.nowhats.com.br/`.
+  - Health: `https://chat.nowhats.com.br/health`.
+  - Webhook: `https://chat.nowhats.com.br/api/evolution/webhook`.
+
+- Atenção segurança:
+  - Chaves em Build Args são incorporadas na imagem; considere definir no EasyPanel e evitar commit público.
