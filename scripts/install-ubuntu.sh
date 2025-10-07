@@ -35,6 +35,9 @@ SSL_ENABLED=0
 # Modo rápido: executar apenas correção de SSL/Nginx
 MODE=${1:-}
 PORT_ARG=${2:-}
+if [[ -n "$PORT_ARG" && "$PORT_ARG" =~ ^[0-9]+$ ]]; then
+  TARGET_HTTP_PORT=$PORT_ARG
+fi
 if [[ "$MODE" == "ssl-only" || "$MODE" == "--ssl-only" ]]; then
   echo "[MODO] ssl-only: executando apenas correção de SSL/Nginx (pula etapas 1–7)."
 
@@ -397,11 +400,11 @@ EOF
     fi
   fi
 else
-  echo "[AVISO] HTTP está na porta ${TARGET_HTTP_PORT}. Tentando emissão em modo standalone com porta alternativa (requer NAT 80→${TARGET_HTTP_PORT})."
+  echo "[AVISO] HTTP está na porta ${TARGET_HTTP_PORT}. Tentando emissão via TLS-ALPN-01 em 443 (sem usar 80)."
   systemctl stop nginx || true
-  fuser -k ${TARGET_HTTP_PORT}/tcp || true
+  fuser -k 443/tcp || true
 
-  if certbot certonly --standalone --http-01-port ${TARGET_HTTP_PORT} -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive; then
+  if certbot certonly --standalone --preferred-challenges tls-alpn-01 -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive || certbot certonly --standalone --http-01-port ${TARGET_HTTP_PORT} -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive; then
     SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
     SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
@@ -421,6 +424,7 @@ server {
 
     ssl_certificate ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     root ${WEB_DIR};
     index index.html;
@@ -450,7 +454,7 @@ EOF
       systemctl start nginx || systemctl restart nginx || true
       SSL_ENABLED=1
     else
-      echo "[ERRO] Falha ao obter certificado SSL com Certbot (standalone em porta ${TARGET_HTTP_PORT})." >&2
+      echo "[ERRO] Falha ao obter certificado SSL com Certbot (TLS-ALPN e HTTP-01)." >&2
       echo "Consulte: /var/log/letsencrypt/letsencrypt.log" >&2
       echo "[INFO] Mantendo site sem SSL na porta ${TARGET_HTTP_PORT}. Para SSL, garanta que a porta 80 externa aponte para este servidor." >&2
       # Voltar Nginx sem SSL na porta alternativa
