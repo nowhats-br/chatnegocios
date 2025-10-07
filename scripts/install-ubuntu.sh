@@ -28,9 +28,13 @@ HTTP_PORT=80
 ALT_HTTP_PORT=8080
 TARGET_HTTP_PORT=$HTTP_PORT
 SSL_PORT=443
+FORCE_HTTP_ONLY=0
+SKIP_SSL=0
+SSL_ENABLED=0
 
 # Modo rápido: executar apenas correção de SSL/Nginx
 MODE=${1:-}
+PORT_ARG=${2:-}
 if [[ "$MODE" == "ssl-only" || "$MODE" == "--ssl-only" ]]; then
   echo "[MODO] ssl-only: executando apenas correção de SSL/Nginx (pula etapas 1–7)."
 
@@ -118,6 +122,18 @@ EOF
   echo "URL de acesso: https://${DOMAIN}/"
   echo "Endpoint de webhook: https://${DOMAIN}${WEBHOOK_PATH}"
   exit 0
+fi
+
+# Modo rápido: servir sem SSL em porta específica (ex.: 81)
+if [[ "$MODE" == "http-only" || "$MODE" == "--http-only" ]]; then
+  FORCE_HTTP_ONLY=1
+  SKIP_SSL=1
+  if [[ -n "$PORT_ARG" && "$PORT_ARG" =~ ^[0-9]+$ ]]; then
+    TARGET_HTTP_PORT=$PORT_ARG
+  else
+    TARGET_HTTP_PORT=81
+  fi
+  echo "[MODO] http-only: servindo sem SSL na porta ${TARGET_HTTP_PORT}."
 fi
 
 echo "\n[1/8] Atualizando pacotes e instalando dependências..."
@@ -238,21 +254,26 @@ echo "\n[7/8] Configurando Nginx para servir SPA e proxy do webhook..."
 NGINX_SITE="/etc/nginx/sites-available/${DOMAIN}.conf"
 NGINX_LINK="/etc/nginx/sites-enabled/${DOMAIN}.conf"
 
-echo "\n[Pré-checagem] Verificando ocupação da porta 80..."
-if ss -ltnp | grep -q ":80 "; then
-  echo "[INFO] Porta 80 ocupada. Tentando liberar..."
-  for svc in apache2 caddy traefik haproxy varnish; do
-    if systemctl is-active --quiet "$svc"; then
-      systemctl stop "$svc" || true
-      systemctl disable "$svc" || true
-    fi
-  done
-  fuser -k 80/tcp || true
-  sleep 2
+if [[ "$FORCE_HTTP_ONLY" -eq 1 ]]; then
+  echo "[Pré-checagem] Modo http-only: usando porta ${TARGET_HTTP_PORT} sem tentar liberar 80."
+  ufw allow ${TARGET_HTTP_PORT}/tcp || true
+else
+  echo "\n[Pré-checagem] Verificando ocupação da porta 80..."
   if ss -ltnp | grep -q ":80 "; then
-    echo "[AVISO] Não foi possível liberar a porta 80. Usaremos a porta ${ALT_HTTP_PORT} para HTTP."
-    TARGET_HTTP_PORT=$ALT_HTTP_PORT
-    ufw allow ${ALT_HTTP_PORT}/tcp || true
+    echo "[INFO] Porta 80 ocupada. Tentando liberar..."
+    for svc in apache2 caddy traefik haproxy varnish; do
+      if systemctl is-active --quiet "$svc"; then
+        systemctl stop "$svc" || true
+        systemctl disable "$svc" || true
+      fi
+    done
+    fuser -k 80/tcp || true
+    sleep 2
+    if ss -ltnp | grep -q ":80 "; then
+      echo "[AVISO] Não foi possível liberar a porta 80. Usaremos a porta ${ALT_HTTP_PORT} para HTTP."
+      TARGET_HTTP_PORT=$ALT_HTTP_PORT
+      ufw allow ${ALT_HTTP_PORT}/tcp || true
+    fi
   fi
 fi
 
@@ -308,10 +329,13 @@ if systemctl is-active --quiet apache2; then
   systemctl disable apache2 || true
 fi
 
-if [[ "$TARGET_HTTP_PORT" -eq 80 ]]; then
+if [[ "$SKIP_SSL" -eq 1 ]]; then
+  echo "[INFO] Modo http-only: pulando emissão de SSL."
+elif [[ "$TARGET_HTTP_PORT" -eq 80 ]]; then
   # Tentar emitir certificado usando o plugin Nginx (com redirecionamento automático)
   if certbot --nginx -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive --redirect; then
     systemctl reload nginx || true
+    SSL_ENABLED=1
   else
     echo "[AVISO] Falha ao emitir certificado com o plugin Nginx. Tentando fallback em modo standalone..."
     # Parar Nginx para liberar a porta 80 ao standalone
@@ -366,6 +390,7 @@ EOF
         exit 1
       fi
       systemctl start nginx || systemctl restart nginx || true
+      SSL_ENABLED=1
     else
       echo "[ERRO] Falha ao obter certificado SSL com Certbot (modo standalone)." >&2
       echo "Consulte: /var/log/letsencrypt/letsencrypt.log" >&2
@@ -423,12 +448,13 @@ EOF
       exit 1
       fi
       systemctl start nginx || systemctl restart nginx || true
+      SSL_ENABLED=1
     else
-    echo "[ERRO] Falha ao obter certificado SSL com Certbot (standalone em porta ${TARGET_HTTP_PORT})." >&2
-    echo "Consulte: /var/log/letsencrypt/letsencrypt.log" >&2
-    echo "[INFO] Mantendo site sem SSL na porta ${TARGET_HTTP_PORT}. Para SSL, garanta que a porta 80 externa aponte para este servidor." >&2
-    # Voltar Nginx sem SSL na porta alternativa
-    cat > "$NGINX_SITE" <<EOF
+      echo "[ERRO] Falha ao obter certificado SSL com Certbot (standalone em porta ${TARGET_HTTP_PORT})." >&2
+      echo "Consulte: /var/log/letsencrypt/letsencrypt.log" >&2
+      echo "[INFO] Mantendo site sem SSL na porta ${TARGET_HTTP_PORT}. Para SSL, garanta que a porta 80 externa aponte para este servidor." >&2
+      # Voltar Nginx sem SSL na porta alternativa
+      cat > "$NGINX_SITE" <<EOF
 server {
     listen ${TARGET_HTTP_PORT};
     listen [::]:${TARGET_HTTP_PORT};
@@ -466,9 +492,15 @@ pm2 save
 systemctl enable pm2-$(whoami) || true
 
 echo "\n==== Instalação concluída ===="
-echo "URL de acesso: https://${DOMAIN}/"
-echo "Endpoint de webhook: https://${DOMAIN}${WEBHOOK_PATH}"
-echo "Certificado SSL: configurado via Let's Encrypt para ${DOMAIN}"
+if [[ "$SSL_ENABLED" -eq 1 ]]; then
+  echo "URL de acesso: https://${DOMAIN}/"
+  echo "Endpoint de webhook: https://${DOMAIN}${WEBHOOK_PATH}"
+  echo "Certificado SSL: configurado via Let's Encrypt para ${DOMAIN}"
+else
+  echo "URL de acesso: http://${DOMAIN}:${TARGET_HTTP_PORT}/"
+  echo "Endpoint de webhook: http://${DOMAIN}:${TARGET_HTTP_PORT}${WEBHOOK_PATH}"
+  echo "Certificado SSL: não configurado (modo HTTP)"
+fi
 echo "Nginx: site em ${NGINX_SITE}"
 echo "Webhook: rodando em http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH} (gerenciado via PM2)"
 echo "Para logs do webhook: pm2 logs chatnegocios-webhook"
