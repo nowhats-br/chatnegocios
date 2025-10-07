@@ -79,7 +79,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
-    return 301 https://$host$request_uri;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
@@ -94,15 +94,15 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     location ${WEBHOOK_PATH} {
         proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
@@ -332,6 +332,68 @@ if systemctl is-active --quiet apache2; then
   systemctl disable apache2 || true
 fi
 
+CF_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+CF_INI="/etc/letsencrypt/cloudflare.ini"
+if [[ -n "$CF_TOKEN" ]]; then
+  echo "[INFO] Detectado CLOUDFLARE_API_TOKEN. Tentando emissão via DNS-01 (Cloudflare)."
+  apt-get update -y || true
+  apt-get install -y python3-certbot-dns-cloudflare || true
+  umask 077
+  printf "dns_cloudflare_api_token = %s\n" "$CF_TOKEN" > "$CF_INI"
+  if certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$CF_INI" -d "$DOMAIN" -m "$EMAIL" --agree-tos --non-interactive; then
+    SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+
+    # Configura Nginx: porta HTTP redireciona para HTTPS e 443 serve a aplicação
+    cat > "$NGINX_SITE" <<EOF
+server {
+    listen ${TARGET_HTTP_PORT};
+    listen [::]:${TARGET_HTTP_PORT};
+    server_name ${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen ${SSL_PORT} ssl;
+    listen [::]:${SSL_PORT} ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate ${SSL_CERT};
+    ssl_certificate_key ${SSL_KEY};
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    root ${WEB_DIR};
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # Proxy do webhook para Node local
+    location ${WEBHOOK_PATH} {
+        proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+    ln -sf "$NGINX_SITE" "$NGINX_LINK"
+    rm -f /etc/nginx/sites-enabled/default || true
+    if ! nginx -t; then
+      echo "[ERRO] Configuração Nginx com SSL inválida após DNS-01. Verifique $NGINX_SITE e os certificados."
+      journalctl -u nginx --no-pager -n 50 || true
+      exit 1
+    fi
+    systemctl start nginx || systemctl restart nginx || true
+    SSL_ENABLED=1
+  else
+    echo "[AVISO] Emissão via DNS-01 (Cloudflare) falhou. Continuando com TLS-ALPN/HTTP-01..."
+  fi
+fi
+
 if [[ "$SKIP_SSL" -eq 1 ]]; then
   echo "[INFO] Modo http-only: pulando emissão de SSL."
 elif [[ "$TARGET_HTTP_PORT" -eq 80 ]]; then
@@ -356,7 +418,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
-    return 301 https://$host$request_uri;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
@@ -371,16 +433,16 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     # Proxy do webhook para Node local
     location ${WEBHOOK_PATH} {
         proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
@@ -409,12 +471,12 @@ else
     SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
     # Configuração Nginx com SSL em 443 e redirecionamento da porta alternativa
-    cat > "$NGINX_SITE" <<EOF
+  cat > "$NGINX_SITE" <<EOF
 server {
     listen ${TARGET_HTTP_PORT};
     listen [::]:${TARGET_HTTP_PORT};
     server_name ${DOMAIN};
-    return 301 https://$host$request_uri;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
@@ -430,16 +492,16 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     # Proxy do webhook para Node local
     location ${WEBHOOK_PATH} {
         proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
@@ -468,15 +530,15 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     location ${WEBHOOK_PATH} {
         proxy_pass http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
