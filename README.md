@@ -124,3 +124,9 @@ Passo a passo com seus valores (nowhats)
 
 - Atenção segurança:
   - Chaves em Build Args são incorporadas na imagem; considere definir no EasyPanel e evitar commit público.
+## Deploy no EasyPanel após ajustes
+
+- Rebuild sem cache e depois `Build & Run` para aplicar o novo `Dockerfile`.
+- Confirme `Dockerfile Path` = `Dockerfile` e `Build Context` = `./`.
+- Valide nos logs: `App ouvindo em http://0.0.0.0:3000` e `Webhook em .../api/evolution/webhook`.
+- Se falhar, copie as últimas 20–30 linhas dos logs de build/exec e compartilhe.

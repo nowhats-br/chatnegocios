@@ -1,10 +1,10 @@
 # Multi-stage build for single-app deployment in EasyPanel
 
-FROM node:18-alpine AS build
+FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Copy package manifests first for better layer caching
-COPY package.json package-lock.json* ./
+COPY package*.json ./
 
 # Build-time environment for Vite (injected into bundle)
 ARG VITE_SUPABASE_URL=https://rtjxkjluufgfqguoeinn.supabase.co
@@ -22,20 +22,20 @@ ENV VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE=${VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE}
 ENV VITE_EVOLUTION_WEBHOOK_URL=${VITE_EVOLUTION_WEBHOOK_URL}
 
 # Install deps and build frontend
-RUN npm ci
+RUN npm install
 COPY . .
-RUN npm run build
+RUN npx tsc && npm run build
 
 
 FROM node:18-alpine AS runner
 WORKDIR /app
 
 # Copy only what's needed to run
-COPY package.json ./
+COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 COPY server ./server
-COPY --from=build /app/dist ./dist
+COPY --from=builder /app/dist ./dist
 
 # Runtime envs for webhook and server
 ENV PORT=3000
