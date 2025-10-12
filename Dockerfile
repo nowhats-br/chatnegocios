@@ -22,7 +22,8 @@ WORKDIR /app
 
 # Copy only what's needed to run
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
+RUN npm prune --production
 
 COPY server ./server
 COPY --from=builder /app/dist ./dist
