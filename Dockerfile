@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage build for single-app deployment in EasyPanel
 
 FROM node:18-alpine AS builder
@@ -5,26 +6,15 @@ WORKDIR /app
 
 # Copy package manifests first for better layer caching
 COPY package*.json ./
-
-# Build-time environment for Vite (injected into bundle)
-ARG VITE_SUPABASE_URL=https://rtjxkjluufgfqguoeinn.supabase.co
-ARG VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0anhramx1dWZnZnFndW9laW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTMwMTIsImV4cCI6MjA3NDcyOTAxMn0.mlZuJLhMUQGeQC0CPIqrFSr1CFC2dA8Muhdpw08cidI
-ARG VITE_EVOLUTION_API_URL=https://evo.nowhats.com.br
-ARG VITE_EVOLUTION_API_KEY=XZ3calYj8iGSF0KxuSQvAwkXFZVDMQjn
-ARG VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE
-ARG VITE_EVOLUTION_WEBHOOK_URL=https://chat.nowhats.com.br/api/evolution/webhook
-
-ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
-ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
-ENV VITE_EVOLUTION_API_URL=${VITE_EVOLUTION_API_URL}
-ENV VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY}
-ENV VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE=${VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE}
-ENV VITE_EVOLUTION_WEBHOOK_URL=${VITE_EVOLUTION_WEBHOOK_URL}
-
-# Install deps and build frontend
 RUN npm install
+
+# Copy source
 COPY . .
-RUN npx tsc && npm run build
+
+# Build frontend loading Vite envs via BuildKit secret
+RUN --mount=type=secret,id=vite_env \
+    export $(grep -v '^#' /run/secrets/vite_env | xargs) && \
+    npx tsc && npm run build
 
 
 FROM node:18-alpine AS runner
