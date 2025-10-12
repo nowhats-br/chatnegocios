@@ -50,13 +50,24 @@ if [[ -z "$SSL_EMAIL" ]]; then
   read -rp "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
 fi
 
-TARGET_DIR="$TARGET_HOME/chatnegocios"
-log "Preparando diretório: $TARGET_DIR"
-rm -rf "$TARGET_DIR"
-mkdir -p "$TARGET_HOME"
-
-log "Clonando repositório em '$TARGET_DIR'..."
-git clone --depth 1 https://github.com/nowhats-br/chatnegocios.git "$TARGET_DIR"
+# Detectar se já estamos dentro de um clone existente
+CURRENT_DIR="$(pwd)"
+if [[ -f "$CURRENT_DIR/scripts/install-all.sh" ]]; then
+  TARGET_DIR="$CURRENT_DIR"
+  log "Repositório já presente no diretório atual: '$TARGET_DIR'. Pulando clone."
+else
+  TARGET_DIR="${TARGET_DIR:-$TARGET_HOME/chatnegocios}"
+  log "Preparando diretório de destino: $TARGET_DIR"
+  mkdir -p "$(dirname "$TARGET_DIR")"
+  if [[ -d "$TARGET_DIR/.git" ]]; then
+    log "Repositório já existe em '$TARGET_DIR'. Pulando clone."
+  elif [[ -d "$TARGET_DIR" && -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]]; then
+    log "Diretório destino existe e não está vazio. Usando-o sem clonar."
+  else
+    log "Clonando repositório em '$TARGET_DIR'..."
+    git clone --depth 1 https://github.com/nowhats-br/chatnegocios.git "$TARGET_DIR"
+  fi
+fi
 
 if [[ ! -d "$TARGET_DIR/scripts" ]]; then
   echo "ERRO: pasta 'scripts' não encontrada em '$TARGET_DIR'."
