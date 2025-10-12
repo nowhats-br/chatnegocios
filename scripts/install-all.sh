@@ -51,14 +51,50 @@ if [[ -z "$CHAT_DOMAIN" ]]; then
 fi
 
 EVO_DOMAIN="evo.nowhats.com.br"
-EVO_TARGET_PORT=4000
+EVO_TARGET_PORT=8080
 CHAT_TARGET_PORT=3000
 
 echo "\nResumo da instalação:" 
 echo "- Domínio ChatNegócios: $CHAT_DOMAIN"
 echo "- E-mail SSL: $SSL_EMAIL"
 echo "- Domínio Evolution API: $EVO_DOMAIN"
-echo "- Portas internas: Chat=3000, Evolution=$EVO_TARGET_PORT (ajustável)"
+echo "- Portas internas: Chat=3000, Evolution=$EVO_TARGET_PORT (forçado)"
+
+echo "\n[0/8] Limpando instalação anterior..."
+# Docker: parar/remover containers e imagens
+docker rm -f chatnegocios 2>/dev/null || true
+docker ps -aq | xargs -r docker rm -f || true
+docker images -q 'chatnegocios:latest' | xargs -r docker rmi -f || true
+
+# Evolution API via Compose: derrubar se existir
+if [[ -d /opt/evolution-api ]]; then
+  if [[ -f /opt/evolution-api/docker-compose.yml || -f /opt/evolution-api/compose.yml ]]; then
+    (cd /opt/evolution-api && docker compose down -v || docker-compose down -v || true)
+  fi
+fi
+
+# PM2: remover processo da Evolution API
+pm2 delete evolution-api 2>/dev/null || true
+pm2 save 2>/dev/null || true
+
+# Remover diretório da Evolution API
+rm -rf /opt/evolution-api || true
+
+# Nginx: remover sites antigos
+rm -f "/etc/nginx/sites-enabled/${CHAT_DOMAIN}.conf" "/etc/nginx/sites-available/${CHAT_DOMAIN}.conf" || true
+rm -f "/etc/nginx/sites-enabled/${EVO_DOMAIN}.conf" "/etc/nginx/sites-available/${EVO_DOMAIN}.conf" || true
+systemctl reload nginx || true
+
+# Certbot: apagar certificados anteriores
+certbot delete -n --cert-name "$CHAT_DOMAIN" 2>/dev/null || true
+certbot delete -n --cert-name "$EVO_DOMAIN" 2>/dev/null || true
+rm -rf "/etc/letsencrypt/live/${CHAT_DOMAIN}" "/etc/letsencrypt/archive/${CHAT_DOMAIN}" "/etc/letsencrypt/renewal/${CHAT_DOMAIN}.conf" || true
+rm -rf "/etc/letsencrypt/live/${EVO_DOMAIN}" "/etc/letsencrypt/archive/${EVO_DOMAIN}" "/etc/letsencrypt/renewal/${EVO_DOMAIN}.conf" || true
+
+# Docker: limpar cache/volumes/builders
+docker system prune -af || true
+docker volume prune -f || true
+docker builder prune -af || true
 
 echo "\n[1/8] Atualizando pacotes e instalando dependências..."
 apt-get update -y
@@ -203,21 +239,9 @@ else
   pm2 save || true
 fi
 
-# Detecta porta upstream da Evolution API por healthcheck
-echo "Detectando porta da Evolution API..."
-EVO_UPSTREAM_PORT="${EVO_TARGET_PORT}"
-for p in 4000 3000 8080 8000 9000; do
-  if curl -sf "http://127.0.0.1:${p}/health" >/dev/null 2>&1 || curl -sf "http://127.0.0.1:${p}/" >/dev/null 2>&1; then
-    EVO_UPSTREAM_PORT="$p"
-    echo "Evolution API respondeu em porta ${EVO_UPSTREAM_PORT}."
-    break
-  fi
-done
-if [[ -z "$EVO_UPSTREAM_PORT" ]]; then
-  EVO_UPSTREAM_PORT="${EVO_TARGET_PORT}"
-fi
+echo "Evolution API será exposta internamente na porta fixa ${EVO_TARGET_PORT}."
 
-echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN} (upstream ${EVO_UPSTREAM_PORT})..."
+echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN} (upstream ${EVO_TARGET_PORT})..."
 EVO_SITE="/etc/nginx/sites-available/${EVO_DOMAIN}.conf"
 EVO_LINK="/etc/nginx/sites-enabled/${EVO_DOMAIN}.conf"
 
@@ -228,7 +252,7 @@ server {
     server_name ${EVO_DOMAIN};
 
     location / {
-        proxy_pass http://127.0.0.1:${EVO_UPSTREAM_PORT};
+        proxy_pass http://127.0.0.1:${EVO_TARGET_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
