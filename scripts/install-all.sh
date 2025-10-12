@@ -216,42 +216,32 @@ rm -rf "$EVO_DIR"
 git clone https://github.com/EvolutionAPI/evolution-api.git "$EVO_DIR"
 cd "$EVO_DIR"
 
-# Tenta iniciar via Docker Compose (se existir)
-if [[ -f docker-compose.yml || -f compose.yml ]]; then
-  # Permite setar porta via .env; fallback para 4000
-  if [[ ! -f .env ]]; then
-    echo "APP_PORT=${EVO_TARGET_PORT}" > .env
-    echo "PORT=${EVO_TARGET_PORT}" >> .env
-  else
-    if ! grep -q "^APP_PORT=" .env; then
-      echo "APP_PORT=${EVO_TARGET_PORT}" >> .env
-    fi
-    if ! grep -q "^PORT=" .env; then
-      echo "PORT=${EVO_TARGET_PORT}" >> .env
-    fi
-  fi
-  docker compose up -d || docker-compose up -d || true
+# Iniciar Evolution API via npm/PM2 (fixa porta 8080 no host)
+echo "Instalando Node.js 20+ para Evolution API..."
+apt-get remove -y nodejs npm libnode-dev || true
+apt-get purge -y nodejs npm libnode-dev || true
+apt-get autoremove -y || true
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs build-essential || true
+npm install -g pm2 || true
+
+# Instalar deps respeitando lockfile se existir
+if [[ -f package-lock.json ]]; then
+  npm ci || npm install || true
 else
-  # Fallback: iniciar via npm/PM2 com Node 20+
-  echo "Instalando Node.js 20+ para Evolution API..."
-  apt-get remove -y nodejs npm libnode-dev || true
-  apt-get purge -y nodejs npm libnode-dev || true
-  apt-get autoremove -y || true
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y nodejs build-essential || true
-  npm install -g pm2 || true
-
-  # Instalar deps respeitando lockfile se existir
-  if [[ -f package-lock.json ]]; then
-    npm ci || npm install || true
-  else
-    npm install || true
-  fi
-
-  # Iniciar informando porta via variáveis de ambiente
-  PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
-  pm2 save || true
+  npm install || true
 fi
+
+# Gerar cliente Prisma antes de iniciar (evita erro @prisma/client did not initialize)
+if npm run | grep -q "prisma:generate"; then
+  npm run prisma:generate || true
+else
+  npx prisma generate || true
+fi
+
+# Iniciar informando porta via variáveis de ambiente
+PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
+pm2 save || true
 
 echo "Evolution API será exposta internamente na porta fixa ${EVO_TARGET_PORT}."
 
