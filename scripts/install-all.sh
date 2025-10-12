@@ -59,19 +59,31 @@ systemctl enable --now docker || true
 echo "\n[3/8] Construindo imagem do ChatNegócios..."
 cd "$APP_DIR"
 
-# Coleta de variáveis VITE_* do .env, se existir
-ENV_ARGS=()
-if [[ -f .env ]]; then
-  while IFS='=' read -r key val; do
-    if [[ "$key" == VITE_* && -n "$val" ]]; then
-      ENV_ARGS+=("--build-arg" "$key=$val")
-    fi
-  done < <(grep -E "^VITE_" .env || true)
+# Preparar arquivo de ambiente para Vite com BuildKit Secret
+ENV_FILE="$APP_DIR/.env.production"
+if [[ -f "$APP_DIR/.env.production" ]]; then
+  ENV_FILE="$APP_DIR/.env.production"
+elif [[ -f "$APP_DIR/.env" ]]; then
+  ENV_FILE="$APP_DIR/.env"
+elif [[ -f "$APP_DIR/.env.example" ]]; then
+  cp "$APP_DIR/.env.example" "$APP_DIR/.env.production"
+  ENV_FILE="$APP_DIR/.env.production"
+else
+  # Cria um básico vazio para não quebrar o build; usuário ajusta depois
+  cat > "$APP_DIR/.env.production" <<'EOF'
+# Preencha os valores VITE_* conforme necessário
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+VITE_EVOLUTION_API_URL=
+VITE_EVOLUTION_API_KEY=
+VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE=
+VITE_EVOLUTION_WEBHOOK_URL=
+EOF
+  ENV_FILE="$APP_DIR/.env.production"
 fi
 
-# Se não houver .env, usa os defaults do Dockerfile (já definidos como ARG/ENV)
 docker rm -f chatnegocios || true
-docker build -t chatnegocios:latest ${ENV_ARGS[@]:-} .
+DOCKER_BUILDKIT=1 docker build --secret id=vite_env,src="$ENV_FILE" -t chatnegocios:latest .
 
 echo "\n[4/8] Subindo container do ChatNegócios (porta 3000)..."
 docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
@@ -133,11 +145,24 @@ if [[ -f docker-compose.yml || -f compose.yml ]]; then
   fi
   docker compose up -d || docker-compose up -d || true
 else
-  # Fallback: iniciar via npm/PM2
-  apt-get install -y nodejs npm || true
-  npm install || true
+  # Fallback: iniciar via npm/PM2 com Node 20+
+  echo "Instalando Node.js 20+ para Evolution API..."
+  apt-get remove -y nodejs npm libnode-dev || true
+  apt-get purge -y nodejs npm libnode-dev || true
+  apt-get autoremove -y || true
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs build-essential || true
   npm install -g pm2 || true
-  pm2 start npm --name evolution-api -- start || true
+
+  # Instalar deps respeitando lockfile se existir
+  if [[ -f package-lock.json ]]; then
+    npm ci || npm install || true
+  else
+    npm install || true
+  fi
+
+  # Iniciar informando porta via variável de ambiente
+  APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
   pm2 save || true
 fi
 
