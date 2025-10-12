@@ -31,6 +31,25 @@ if [[ -z "$SSL_EMAIL" ]]; then
   read -r -p "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
 fi
 
+# Sanitização robusta do domínio (remove http/https, barras, aspas/backticks e espaços)
+sanitize_domain() {
+  local d="$1"
+  d="${d#http://}"
+  d="${d#https://}"
+  d="${d%%/*}"
+  d="${d//\`/}"
+  d="${d//\"/}"
+  d="${d//\'/}"
+  d="$(echo "$d" | tr -d '[:space:]')"
+  echo "$d"
+}
+
+CHAT_DOMAIN="$(sanitize_domain "$CHAT_DOMAIN")"
+if [[ -z "$CHAT_DOMAIN" ]]; then
+  echo "[ERRO] Domínio inválido após sanitização." >&2
+  exit 1
+fi
+
 EVO_DOMAIN="evo.nowhats.com.br"
 EVO_TARGET_PORT=4000
 CHAT_TARGET_PORT=3000
@@ -89,6 +108,7 @@ echo "\n[4/8] Subindo container do ChatNegócios (porta 3000)..."
 docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
 
 echo "\n[5/8] Configurando Nginx e SSL para ${CHAT_DOMAIN}..."
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || true
 CHAT_SITE="/etc/nginx/sites-available/${CHAT_DOMAIN}.conf"
 CHAT_LINK="/etc/nginx/sites-enabled/${CHAT_DOMAIN}.conf"
 
