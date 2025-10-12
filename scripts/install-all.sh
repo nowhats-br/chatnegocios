@@ -107,6 +107,23 @@ DOCKER_BUILDKIT=1 docker build --secret id=vite_env,src="$ENV_FILE" -t chatnegoc
 echo "\n[4/8] Subindo container do ChatNegócios (porta 3000)..."
 docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
 
+# Aguarda saúde do ChatNegócios antes de configurar Nginx
+echo "Aguardando ChatNegócios ficar saudável..."
+CHAT_HEALTH_OK=0
+for i in $(seq 1 30); do
+  if curl -sf "http://127.0.0.1:${CHAT_TARGET_PORT}/health" >/dev/null 2>&1; then
+    CHAT_HEALTH_OK=1
+    echo "ChatNegócios respondeu /health."
+    break
+  fi
+  sleep 2
+done
+if [[ "$CHAT_HEALTH_OK" -ne 1 ]]; then
+  echo "[ERRO] ChatNegócios não ficou saudável a tempo. Logs:" >&2
+  docker logs --tail=200 chatnegocios || true
+  echo "Verifique variáveis VITE_ e reconstrução da imagem." >&2
+fi
+
 echo "\n[5/8] Configurando Nginx e SSL para ${CHAT_DOMAIN}..."
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || true
 CHAT_SITE="/etc/nginx/sites-available/${CHAT_DOMAIN}.conf"
@@ -186,7 +203,21 @@ else
   pm2 save || true
 fi
 
-echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN}..."
+# Detecta porta upstream da Evolution API por healthcheck
+echo "Detectando porta da Evolution API..."
+EVO_UPSTREAM_PORT="${EVO_TARGET_PORT}"
+for p in 4000 3000 8080 8000 9000; do
+  if curl -sf "http://127.0.0.1:${p}/health" >/dev/null 2>&1 || curl -sf "http://127.0.0.1:${p}/" >/dev/null 2>&1; then
+    EVO_UPSTREAM_PORT="$p"
+    echo "Evolution API respondeu em porta ${EVO_UPSTREAM_PORT}."
+    break
+  fi
+done
+if [[ -z "$EVO_UPSTREAM_PORT" ]]; then
+  EVO_UPSTREAM_PORT="${EVO_TARGET_PORT}"
+fi
+
+echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN} (upstream ${EVO_UPSTREAM_PORT})..."
 EVO_SITE="/etc/nginx/sites-available/${EVO_DOMAIN}.conf"
 EVO_LINK="/etc/nginx/sites-enabled/${EVO_DOMAIN}.conf"
 
@@ -197,7 +228,7 @@ server {
     server_name ${EVO_DOMAIN};
 
     location / {
-        proxy_pass http://127.0.0.1:${EVO_TARGET_PORT};
+        proxy_pass http://127.0.0.1:${EVO_UPSTREAM_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
