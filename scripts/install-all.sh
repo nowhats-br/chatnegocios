@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# ChatNegócios + Evolution API — Instalador Único para Ubuntu
+#
+# O que faz:
+# - Solicita apenas DOMÍNIO (ChatNegócios) e e-mail (SSL)
+# - Instala Docker, Nginx e Certbot
+# - Constrói e roda o container do ChatNegócios (porta interna 3000)
+# - Configura Nginx com SSL para o domínio informado e proxy para o container
+# - Clona e inicia Evolution API (via Docker Compose se disponível, senão via npm/PM2)
+# - Configura Nginx com SSL para evo.nowhats.com.br
+# - Sobrescreve configurações existentes de Nginx e serviços, prossegue automaticamente
+
+if [[ $EUID -ne 0 ]]; then
+  echo "[ERRO] Este script deve ser executado como root (use sudo)." >&2
+  exit 1
+fi
+
+APP_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
+
+CHAT_DOMAIN="${CHAT_DOMAIN:-}"
+SSL_EMAIL="${SSL_EMAIL:-}"
+
+if [[ -z "$CHAT_DOMAIN" ]]; then
+  read -r -p "Informe o domínio para ChatNegócios (ex.: chat.seu-dominio.com): " CHAT_DOMAIN
+fi
+
+if [[ -z "$SSL_EMAIL" ]]; then
+  read -r -p "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
+fi
+
+EVO_DOMAIN="evo.nowhats.com.br"
+EVO_TARGET_PORT=4000
+CHAT_TARGET_PORT=3000
+
+echo "\nResumo da instalação:" 
+echo "- Domínio ChatNegócios: $CHAT_DOMAIN"
+echo "- E-mail SSL: $SSL_EMAIL"
+echo "- Domínio Evolution API: $EVO_DOMAIN"
+echo "- Portas internas: Chat=3000, Evolution=$EVO_TARGET_PORT (ajustável)"
+
+echo "\n[1/8] Atualizando pacotes e instalando dependências..."
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg lsb-release git ufw nginx python3-certbot-nginx jq || true
+
+echo "\n[2/8] Instalando Docker e Compose..."
+if ! command -v docker >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  apt-get update -y
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+systemctl enable --now docker || true
+
+echo "\n[3/8] Construindo imagem do ChatNegócios..."
+cd "$APP_DIR"
+
+# Coleta de variáveis VITE_* do .env, se existir
+ENV_ARGS=()
+if [[ -f .env ]]; then
+  while IFS='=' read -r key val; do
+    if [[ "$key" == VITE_* && -n "$val" ]]; then
+      ENV_ARGS+=("--build-arg" "$key=$val")
+    fi
+  done < <(grep -E "^VITE_" .env || true)
+fi
+
+# Se não houver .env, usa os defaults do Dockerfile (já definidos como ARG/ENV)
+docker rm -f chatnegocios || true
+docker build -t chatnegocios:latest ${ENV_ARGS[@]:-} .
+
+echo "\n[4/8] Subindo container do ChatNegócios (porta 3000)..."
+docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
+
+echo "\n[5/8] Configurando Nginx e SSL para ${CHAT_DOMAIN}..."
+CHAT_SITE="/etc/nginx/sites-available/${CHAT_DOMAIN}.conf"
+CHAT_LINK="/etc/nginx/sites-enabled/${CHAT_DOMAIN}.conf"
+
+cat > "$CHAT_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CHAT_DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:${CHAT_TARGET_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:${CHAT_TARGET_PORT}/health;
+        proxy_set_header Host \$host;
+    }
+
+    location /api/evolution/webhook {
+        proxy_pass http://127.0.0.1:${CHAT_TARGET_PORT}/api/evolution/webhook;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+ln -sf "$CHAT_SITE" "$CHAT_LINK"
+rm -f /etc/nginx/sites-enabled/default || true
+nginx -t
+systemctl restart nginx
+certbot --nginx -d "$CHAT_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive || true
+
+echo "\n[6/8] Clonando e iniciando Evolution API..."
+EVO_DIR="/opt/evolution-api"
+rm -rf "$EVO_DIR"
+git clone https://github.com/EvolutionAPI/evolution-api.git "$EVO_DIR"
+cd "$EVO_DIR"
+
+# Tenta iniciar via Docker Compose (se existir)
+if [[ -f docker-compose.yml || -f compose.yml ]]; then
+  # Permite setar porta via .env; fallback para 4000
+  if [[ ! -f .env ]]; then
+    echo "APP_PORT=${EVO_TARGET_PORT}" > .env
+  else
+    if ! grep -q "^APP_PORT=" .env; then
+      echo "APP_PORT=${EVO_TARGET_PORT}" >> .env
+    fi
+  fi
+  docker compose up -d || docker-compose up -d || true
+else
+  # Fallback: iniciar via npm/PM2
+  apt-get install -y nodejs npm || true
+  npm install || true
+  npm install -g pm2 || true
+  pm2 start npm --name evolution-api -- start || true
+  pm2 save || true
+fi
+
+echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN}..."
+EVO_SITE="/etc/nginx/sites-available/${EVO_DOMAIN}.conf"
+EVO_LINK="/etc/nginx/sites-enabled/${EVO_DOMAIN}.conf"
+
+cat > "$EVO_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${EVO_DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:${EVO_TARGET_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+ln -sf "$EVO_SITE" "$EVO_LINK"
+nginx -t
+systemctl restart nginx
+certbot --nginx -d "$EVO_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive || true
+
+echo "\n[8/8] Verificações rápidas..."
+echo "- SPA: https://${CHAT_DOMAIN}/"
+echo "- Health: https://${CHAT_DOMAIN}/health"
+echo "- Webhook: https://${CHAT_DOMAIN}/api/evolution/webhook"
+echo "- Evolution API: https://${EVO_DOMAIN}/"
+
+echo "\nComandos úteis:"
+echo "- Logs ChatNegócios: docker logs -f chatnegocios"
+echo "- Reiniciar ChatNegócios: docker restart chatnegocios"
+echo "- Ver serviços Evolution (compose): (cd /opt/evolution-api && docker compose ps)"
+echo "- PM2 Evolution (fallback): pm2 status && pm2 logs evolution-api"
+
+echo "\nImportante:"
+echo "- Variáveis VITE_* são de build; ajuste .env e rode rebuild se precisar:"
+echo "  docker rm -f chatnegocios && cd $APP_DIR && docker build --no-cache -t chatnegocios:latest . && docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest"
+echo "- Configure o mesmo endpoint em VITE_EVOLUTION_WEBHOOK_URL e no Manager Evolution."
+
+echo "\nInstalação concluída com sucesso!"
