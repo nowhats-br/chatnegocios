@@ -22,6 +22,7 @@ APP_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 
 CHAT_DOMAIN="${CHAT_DOMAIN:-}"
 SSL_EMAIL="${SSL_EMAIL:-}"
+EVO_DOMAIN="${EVO_DOMAIN:-}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -r -p "Informe o domínio para ChatNegócios (ex.: chat.seu-dominio.com): " CHAT_DOMAIN
@@ -29,6 +30,10 @@ fi
 
 if [[ -z "$SSL_EMAIL" ]]; then
   read -r -p "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
+fi
+
+if [[ -z "$EVO_DOMAIN" ]]; then
+  read -r -p "Informe o domínio para Evolution API (ex.: api.seu-dominio.com): " EVO_DOMAIN
 fi
 
 # Sanitização robusta do domínio (remove http/https, barras, aspas/backticks e espaços)
@@ -50,7 +55,12 @@ if [[ -z "$CHAT_DOMAIN" ]]; then
   exit 1
 fi
 
-EVO_DOMAIN="evo.nowhats.com.br"
+EVO_DOMAIN="$(sanitize_domain "$EVO_DOMAIN")"
+if [[ -z "$EVO_DOMAIN" ]]; then
+  echo "[ERRO] Domínio Evolution API inválido após sanitização." >&2
+  exit 1
+fi
+
 EVO_TARGET_PORT=8080
 CHAT_TARGET_PORT=3000
 
@@ -211,9 +221,13 @@ if [[ -f docker-compose.yml || -f compose.yml ]]; then
   # Permite setar porta via .env; fallback para 4000
   if [[ ! -f .env ]]; then
     echo "APP_PORT=${EVO_TARGET_PORT}" > .env
+    echo "PORT=${EVO_TARGET_PORT}" >> .env
   else
     if ! grep -q "^APP_PORT=" .env; then
       echo "APP_PORT=${EVO_TARGET_PORT}" >> .env
+    fi
+    if ! grep -q "^PORT=" .env; then
+      echo "PORT=${EVO_TARGET_PORT}" >> .env
     fi
   fi
   docker compose up -d || docker-compose up -d || true
@@ -234,12 +248,35 @@ else
     npm install || true
   fi
 
-  # Iniciar informando porta via variável de ambiente
-  APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
+  # Iniciar informando porta via variáveis de ambiente
+  PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
   pm2 save || true
 fi
 
 echo "Evolution API será exposta internamente na porta fixa ${EVO_TARGET_PORT}."
+
+# Aguarda saúde da Evolution API antes de configurar Nginx
+echo "Aguardando Evolution API ficar saudável..."
+EVO_HEALTH_OK=0
+for i in $(seq 1 30); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${EVO_TARGET_PORT}/health" || echo 000)
+  if [[ "$CODE" -ge 200 && "$CODE" -lt 500 ]]; then
+    EVO_HEALTH_OK=1
+    echo "Evolution API respondeu /health (HTTP $CODE)."
+    break
+  fi
+  # Tenta raiz como fallback
+  CODE_ROOT=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${EVO_TARGET_PORT}/" || echo 000)
+  if [[ "$CODE_ROOT" -ge 200 && "$CODE_ROOT" -lt 500 ]]; then
+    EVO_HEALTH_OK=1
+    echo "Evolution API respondeu raiz (HTTP $CODE_ROOT)."
+    break
+  fi
+  sleep 2
+done
+if [[ "$EVO_HEALTH_OK" -ne 1 ]]; then
+  echo "[ALERTA] Evolution API não confirmou saúde a tempo. Continuando assim mesmo. Verifique logs (compose/PM2)." >&2
+fi
 
 echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN} (upstream ${EVO_TARGET_PORT})..."
 EVO_SITE="/etc/nginx/sites-available/${EVO_DOMAIN}.conf"
@@ -257,6 +294,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:${EVO_TARGET_PORT}/health;
+        proxy_set_header Host \$host;
     }
 }
 EOF
