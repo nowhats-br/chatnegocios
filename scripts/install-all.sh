@@ -14,15 +14,7 @@ set -euo pipefail
 # - Sobrescreve configurações existentes de Nginx e serviços, prossegue automaticamente
 
 if [[ $EUID -ne 0 ]]; then
-  echo "[ERRO] Este script deve ser executado como root (use sudo)." >&2\n[7/8] Configurando Nginx e SSL para evo.nowhats.com.br (upstream 8080)...
-nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
-nginx: configuration file /etc/nginx/nginx.conf test is successful
-Saving debug log to /var/log/letsencrypt/letsencrypt.log
-Requesting a certificate for evo.nowhats.com.br
-An unexpected error occurred:
-There were too many requests of a given type :: too many certificates (5) already issued for this exact set of identifiers in the last 168h0m0s, retry after 2025-10-14 04:20:18 UTC: see https://letsencrypt.org/docs/rate-limits/#new-certificates-per-exact-set-of-identifiers
-Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /var/log/letsencrypt/letsencrypt.log or re-run Certbot with -v for more details.
-\n[8/8] Verificaçõe
+  echo "[ERRO] Este script deve ser executado como root (use sudo)." >&2
   exit 1
 fi
 
