@@ -215,6 +215,13 @@ EVO_DIR="/opt/evolution-api"
 rm -rf "$EVO_DIR"
 git clone https://github.com/EvolutionAPI/evolution-api.git "$EVO_DIR"
 cd "$EVO_DIR"
+ 
+ # Criar .env padrão se não existir (SQLite local) para evitar falha do Prisma
+ if [[ ! -f .env ]]; then
+   cat > .env <<'EOF'
+DATABASE_URL="file:./dev.db"
+EOF
+ fi
 
 # Iniciar Evolution API via npm/PM2 (fixa porta 8080 no host)
 echo "Instalando Node.js 20+ para Evolution API..."
@@ -238,6 +245,11 @@ if npm run | grep -q "prisma:generate"; then
 else
   npx prisma generate || true
 fi
+ 
+ # Aplicar migrações de banco (ou sincronizar schema) para garantir tabelas
+ if command -v npx >/dev/null 2>&1; then
+   npx prisma migrate deploy || npx prisma db push || true
+ fi
 
 # Iniciar informando porta via variáveis de ambiente
 PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
@@ -284,11 +296,18 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 600s;
     }
 
     location /health {
         proxy_pass http://127.0.0.1:${EVO_TARGET_PORT}/health;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF

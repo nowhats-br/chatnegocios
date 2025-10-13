@@ -34,4 +34,4 @@ ENV WEBHOOK_PORT=3000
 ENV WEBHOOK_PATH=/api/evolution/webhook
 
 EXPOSE 3000
-CMD ["node", "server/app.js"]
+CMD ["node", "server/app.cjs"]
