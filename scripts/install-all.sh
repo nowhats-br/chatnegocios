@@ -187,7 +187,7 @@ cat > "$CHAT_SITE" <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name ${CHAT_DOMAIN};
+    server_name ${CHAT_DOMAIN} www.${CHAT_DOMAIN};
 
     location / {
         proxy_pass http://127.0.0.1:${CHAT_TARGET_PORT};
@@ -214,6 +214,19 @@ EOF
 
 ln -sf "$CHAT_SITE" "$CHAT_LINK"
 rm -f /etc/nginx/sites-enabled/default || true
+
+# Criar um vhost catch-all para evitar que domínios não configurados caiam na SPA
+CATCH_ALL="/etc/nginx/sites-available/00-catch-all.conf"
+cat > "$CATCH_ALL" <<'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+EOF
+ln -sf "$CATCH_ALL" "/etc/nginx/sites-enabled/00-catch-all.conf"
+
 nginx -t
 systemctl restart nginx
 # Permite uso opcional do ambiente de staging do Let's Encrypt para testes
@@ -259,17 +272,29 @@ else
   npm install || true
 fi
 
-# Gerar cliente Prisma antes de iniciar (evita erro @prisma/client did not initialize)
-if npm run | grep -q "prisma:generate"; then
-  npm run prisma:generate || true
-else
-  npx prisma generate || true
+# Detectar Prisma Schema antes de gerar cliente/migrar
+HAS_PRISMA_SCHEMA=0
+if [[ -f prisma/schema.prisma || -f schema.prisma ]]; then
+  HAS_PRISMA_SCHEMA=1
 fi
- 
- # Aplicar migrações de banco (ou sincronizar schema) para garantir tabelas
- if command -v npx >/dev/null 2>&1; then
-   npx prisma migrate deploy || npx prisma db push || true
- fi
+
+# Gerar cliente Prisma antes de iniciar, somente se houver schema
+if [[ "$HAS_PRISMA_SCHEMA" -eq 1 ]]; then
+  if npm run | grep -q "prisma:generate"; then
+    npm run prisma:generate || true
+  else
+    npx prisma generate || true
+  fi
+else
+  echo "[AVISO] Prisma schema não encontrado (prisma/schema.prisma ou schema.prisma). Pulando geração do cliente." >&2
+fi
+
+# Aplicar migrações (ou sincronizar schema), somente se houver schema
+if [[ "$HAS_PRISMA_SCHEMA" -eq 1 ]] && command -v npx >/dev/null 2>&1; then
+  npx prisma migrate deploy || npx prisma db push || true
+else
+  echo "[AVISO] Prisma schema ausente ou npx indisponível. Pulando migrações/sincronização." >&2
+fi
 
 # Iniciar informando porta via variáveis de ambiente
 PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
@@ -320,7 +345,7 @@ cat > "$EVO_SITE" <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name ${EVO_DOMAIN};
+    server_name ${EVO_DOMAIN} www.${EVO_DOMAIN};
 
     # Aceitar payloads maiores e reduzir chances de 502 por timeout
     client_max_body_size 50M;
