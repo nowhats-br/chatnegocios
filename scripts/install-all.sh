@@ -10,11 +10,19 @@ set -euo pipefail
 # - Constrói e roda o container do ChatNegócios (porta interna 3000)
 # - Configura Nginx com SSL para o domínio informado e proxy para o container
 # - Clona e inicia Evolution API (via Docker Compose se disponível, senão via npm/PM2)
-# - Configura Nginx com SSL para evo.nowhats.com.br
+# - Configura Nginx com SSL para api.nowhats.com.br
 # - Sobrescreve configurações existentes de Nginx e serviços, prossegue automaticamente
 
 if [[ $EUID -ne 0 ]]; then
-  echo "[ERRO] Este script deve ser executado como root (use sudo)." >&2
+  echo "[ERRO] Este script deve ser executado como root (use sudo)." >&2\n[7/8] Configurando Nginx e SSL para evo.nowhats.com.br (upstream 8080)...
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Requesting a certificate for evo.nowhats.com.br
+An unexpected error occurred:
+There were too many requests of a given type :: too many certificates (5) already issued for this exact set of identifiers in the last 168h0m0s, retry after 2025-10-14 04:20:18 UTC: see https://letsencrypt.org/docs/rate-limits/#new-certificates-per-exact-set-of-identifiers
+Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /var/log/letsencrypt/letsencrypt.log or re-run Certbot with -v for more details.
+\n[8/8] Verificaçõe
   exit 1
 fi
 
@@ -69,6 +77,14 @@ echo "- Domínio ChatNegócios: $CHAT_DOMAIN"
 echo "- E-mail SSL: $SSL_EMAIL"
 echo "- Domínio Evolution API: $EVO_DOMAIN"
 echo "- Portas internas: Chat=3000, Evolution=$EVO_TARGET_PORT (forçado)"
+
+# Dica de migração: domínios nowhats
+if [[ "$EVO_DOMAIN" == "evo.nowhats.com.br" ]]; then
+  echo "[AVISO] Detectado domínio antigo (evo.nowhats.com.br). Recomenda-se usar api.nowhats.com.br."
+fi
+if [[ "$CHAT_DOMAIN" == "chat.nowhats.com.br" ]]; then
+  echo "[AVISO] Detectado domínio antigo (chat.nowhats.com.br). Recomenda-se usar chatnegocios.nowhats.com.br."
+fi
 
 echo "\n[0/8] Limpando instalação anterior..."
 # Docker: parar/remover containers e imagens
@@ -208,7 +224,19 @@ ln -sf "$CHAT_SITE" "$CHAT_LINK"
 rm -f /etc/nginx/sites-enabled/default || true
 nginx -t
 systemctl restart nginx
-certbot --nginx -d "$CHAT_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive || true
+# Permite uso opcional do ambiente de staging do Let's Encrypt para testes
+CERTBOT_EXTRA_ARGS=""
+if [[ "${USE_CERTBOT_STAGING:-0}" -eq 1 ]]; then
+  echo "[INFO] Usando Let's Encrypt em modo STAGING para ${CHAT_DOMAIN}."
+  CERTBOT_EXTRA_ARGS="--staging"
+fi
+certbot --nginx -d "$CHAT_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive $CERTBOT_EXTRA_ARGS || true
+
+# Detecta se o certificado foi emitido com sucesso para ajustar mensagens finais
+CHAT_SSL_ENABLED=0
+if [[ -f "/etc/letsencrypt/live/${CHAT_DOMAIN}/fullchain.pem" && -f "/etc/letsencrypt/live/${CHAT_DOMAIN}/privkey.pem" ]]; then
+  CHAT_SSL_ENABLED=1
+fi
 
 echo "\n[6/8] Clonando e iniciando Evolution API..."
 EVO_DIR="/opt/evolution-api"
@@ -315,13 +343,39 @@ EOF
 ln -sf "$EVO_SITE" "$EVO_LINK"
 nginx -t
 systemctl restart nginx
-certbot --nginx -d "$EVO_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive || true
+# Usa staging opcionalmente para evitar limites durante testes
+EVO_CERTBOT_EXTRA_ARGS=""
+if [[ "${USE_CERTBOT_STAGING:-0}" -eq 1 ]]; then
+  echo "[INFO] Usando Let's Encrypt em modo STAGING para ${EVO_DOMAIN}."
+  EVO_CERTBOT_EXTRA_ARGS="--staging"
+fi
+certbot --nginx -d "$EVO_DOMAIN" -m "$SSL_EMAIL" --agree-tos --redirect --non-interactive $EVO_CERTBOT_EXTRA_ARGS || true
+
+# Detecta certificado da Evolution API para ajustar mensagens finais
+EVO_SSL_ENABLED=0
+if [[ -f "/etc/letsencrypt/live/${EVO_DOMAIN}/fullchain.pem" && -f "/etc/letsencrypt/live/${EVO_DOMAIN}/privkey.pem" ]]; then
+  EVO_SSL_ENABLED=1
+fi
 
 echo "\n[8/8] Verificações rápidas..."
-echo "- SPA: https://${CHAT_DOMAIN}/"
-echo "- Health: https://${CHAT_DOMAIN}/health"
-echo "- Webhook: https://${CHAT_DOMAIN}/api/evolution/webhook"
-echo "- Evolution API: https://${EVO_DOMAIN}/"
+if [[ "$CHAT_SSL_ENABLED" -eq 1 ]]; then
+  echo "- SPA: https://${CHAT_DOMAIN}/"
+  echo "- Health: https://${CHAT_DOMAIN}/health"
+  echo "- Webhook: https://${CHAT_DOMAIN}/api/evolution/webhook"
+else
+  echo "- SPA: http://${CHAT_DOMAIN}/"
+  echo "- Health: http://${CHAT_DOMAIN}/health"
+  echo "- Webhook: http://${CHAT_DOMAIN}/api/evolution/webhook"
+fi
+if [[ "$EVO_SSL_ENABLED" -eq 1 ]]; then
+  echo "- Evolution API: https://${EVO_DOMAIN}/"
+  if [[ "${USE_CERTBOT_STAGING:-0}" -eq 1 ]]; then
+    echo "  (emitido em STAGING; não confiável publicamente. Reemita sem --staging quando liberar o limite.)"
+  fi
+else
+  echo "- Evolution API: http://${EVO_DOMAIN}/"
+  echo "  (sem SSL; você pode ativar depois rodando certbot ou reexecutando com USE_CERTBOT_STAGING=1 para testes)"
+fi
 
 echo "\nComandos úteis:"
 echo "- Logs ChatNegócios: docker logs -f chatnegocios"

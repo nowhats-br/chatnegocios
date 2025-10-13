@@ -133,7 +133,7 @@ export default function Connections() {
         qrcode: false, // Não gerar QR Code automaticamente
         integration: "WHATSAPP-BAILEYS",
         webhook: {
-          url: webhookUrlEnv || `${window.location.origin}/webhook`,
+          url: webhookUrlEnv || `${window.location.origin}/api/evolution/webhook`,
           enabled: Boolean(webhookUrlEnv),
           events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"]
         }
@@ -184,7 +184,7 @@ export default function Connections() {
     try {
       // Atualizar status para connecting
       await supabase.from('connections').update({ 
-        status: 'connecting' 
+        status: 'CONNECTING' 
       }).eq('id', connection.id);
 
       // 1) Chamar endpoint de conexão da Evolution API
@@ -202,11 +202,11 @@ export default function Connections() {
 
       if (qrData?.qrCode) {
         setQrCodeData(qrData.qrCode);
-        await supabase.from('connections').update({ status: 'connecting' }).eq('id', connection.id);
+        await supabase.from('connections').update({ status: 'CONNECTING' }).eq('id', connection.id);
         toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else if (qrData?.pairing) {
         setPairingCode(qrData.pairing);
-        await supabase.from('connections').update({ status: 'connecting' }).eq('id', connection.id);
+        await supabase.from('connections').update({ status: 'CONNECTING' }).eq('id', connection.id);
         toast.success("Código de pareamento gerado! Use-o para conectar.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else {
         const lastError = evolutionError ? ` Detalhes: ${evolutionError}` : '';
@@ -218,7 +218,7 @@ export default function Connections() {
       
       // Reverter status para disconnected em caso de erro
       await supabase.from('connections').update({ 
-        status: 'disconnected' 
+        status: 'DISCONNECTED' 
       }).eq('id', connection.id);
       
       setIsQrModalOpen(false);

@@ -9,9 +9,9 @@ Webhooks
 
 Diferença: URL base da API vs Webhook (destino)
 -----------------------------------------------
-- `VITE_EVOLUTION_API_URL` é a URL base do seu provedor Evolution (ex.: `https://evo.nowhats.com.br`). É onde o app faz requisições para criar/gerar QR/etc.
+- `VITE_EVOLUTION_API_URL` é a URL base do seu provedor Evolution (ex.: `https://api.nowhats.com.br`). É onde o app faz requisições para criar/gerar QR/etc.
 - `VITE_EVOLUTION_WEBHOOK_URL` é a SUA URL pública que recebe os eventos via POST.
-- Exemplo incorreto de webhook (não usar): `https://evo.nowhats.com.br/api/evolution/webhook`.
+- Exemplo incorreto de webhook (não usar): `https://api.nowhats.com.br/api/evolution/webhook`.
 - Exemplo correto de webhook: `https://seu-dominio.com/api/evolution/webhook` (ou URL de túnel em dev).
 
 QR Code — Endpoint
@@ -24,7 +24,7 @@ QR Code — Endpoint
 
 Variáveis de ambiente
 ---------------------
-- `VITE_EVOLUTION_API_URL`: URL base da Evolution API do seu provedor (ex.: `https://evo.nowhats.com.br`).
+- `VITE_EVOLUTION_API_URL`: URL base da Evolution API do seu provedor (ex.: `https://api.nowhats.com.br`).
 - `VITE_EVOLUTION_API_KEY`: Chave da API fornecida pelo seu provedor.
 - `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: Template opcional para a rota do QR.
 - `VITE_EVOLUTION_WEBHOOK_URL`: URL pública do seu endpoint receptor de webhooks.
@@ -98,13 +98,13 @@ Notas importantes
 
 Passo a passo com seus valores (nowhats)
 ---------------------------------------
-- Domínio do app: `https://chat.nowhats.com.br`.
-- Webhook público: `https://chat.nowhats.com.br/api/evolution/webhook`.
+- Domínio do app: `https://chatnegocios.nowhats.com.br`.
+- Webhook público: `https://chatnegocios.nowhats.com.br/api/evolution/webhook`.
 - Manager Evolution: informar o webhook exatamente como acima.
 
 - Build Args (Vite):
-  - `VITE_EVOLUTION_API_URL`: `https://evo.nowhats.com.br`.
-  - `VITE_EVOLUTION_WEBHOOK_URL`: `https://chat.nowhats.com.br/api/evolution/webhook`.
+  - `VITE_EVOLUTION_API_URL`: `https://api.nowhats.com.br`.
+  - `VITE_EVOLUTION_WEBHOOK_URL`: `https://chatnegocios.nowhats.com.br/api/evolution/webhook`.
   - `VITE_EVOLUTION_API_KEY`: `XZ3calYj8iGSF0KxuSQvAwkXFZVDMQjn`.
   - `VITE_SUPABASE_ANON_KEY`: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0anhramx1dWZnZnFndW9laW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTMwMTIsImV4cCI6MjA3NDcyOTAxMn0.mlZuJLhMUQGeQC0CPIqrFSr1CFC2dA8Muhdpw08cidI`.
   - `VITE_SUPABASE_URL`: `https://rtjxkjluufgfqguoeinn.supabase.co`.
@@ -114,13 +114,13 @@ Passo a passo com seus valores (nowhats)
   - `WEBHOOK_PATH`: `/api/evolution/webhook`.
 
 - Deploy:
-  - Vincule `chat.nowhats.com.br` ao app no EasyPanel e ative SSL.
+  - Vincule `chatnegocios.nowhats.com.br` ao app no EasyPanel e ative SSL.
   - Build + Run com os valores acima.
 
 - Testes rápidos:
-  - SPA: `https://chat.nowhats.com.br/`.
-  - Health: `https://chat.nowhats.com.br/health`.
-  - Webhook: `https://chat.nowhats.com.br/api/evolution/webhook`.
+  - SPA: `https://chatnegocios.nowhats.com.br/`.
+  - Health: `https://chatnegocios.nowhats.com.br/health`.
+  - Webhook: `https://chatnegocios.nowhats.com.br/api/evolution/webhook`.
 
 - Atenção segurança:
   - Chaves em Build Args são incorporadas na imagem; considere definir no EasyPanel e evitar commit público.
