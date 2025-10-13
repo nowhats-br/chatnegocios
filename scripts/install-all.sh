@@ -297,7 +297,19 @@ for i in $(seq 1 30); do
   sleep 2
 done
 if [[ "$EVO_HEALTH_OK" -ne 1 ]]; then
-  echo "[ALERTA] Evolution API não confirmou saúde a tempo. Continuando assim mesmo. Verifique logs (compose/PM2)." >&2
+  echo "[ALERTA] Evolution API não confirmou saúde a tempo. Tentando auto-detectar porta real." >&2
+  # Auto-detecção de porta: verifica portas comuns e ajusta upstream se encontrar resposta
+  for p in 8080 4020 4001 4000 3000; do
+    if curl -sf "http://127.0.0.1:${p}/health" >/dev/null 2>&1 || curl -sf "http://127.0.0.1:${p}/" >/dev/null 2>&1; then
+      EVO_TARGET_PORT="$p"
+      echo "[INFO] Detectado Evolution API respondendo na porta ${EVO_TARGET_PORT}. Upstream ajustado."
+      EVO_HEALTH_OK=1
+      break
+    fi
+  done
+  if [[ "$EVO_HEALTH_OK" -ne 1 ]]; then
+    echo "[ALERTA] Não foi possível detectar porta da Evolution API. Prosseguindo com ${EVO_TARGET_PORT}. Verifique PM2 e logs." >&2
+  fi
 fi
 
 echo "\n[7/8] Configurando Nginx e SSL para ${EVO_DOMAIN} (upstream ${EVO_TARGET_PORT})..."
@@ -310,6 +322,9 @@ server {
     listen [::]:80;
     server_name ${EVO_DOMAIN};
 
+    # Aceitar payloads maiores e reduzir chances de 502 por timeout
+    client_max_body_size 50M;
+
     location / {
         proxy_pass http://127.0.0.1:${EVO_TARGET_PORT};
         proxy_set_header Host \$host;
@@ -319,7 +334,10 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 600s;
         proxy_read_timeout 600s;
+        proxy_buffering off;
     }
 
     location /health {
@@ -333,6 +351,7 @@ server {
 EOF
 
 ln -sf "$EVO_SITE" "$EVO_LINK"
+rm -f /etc/nginx/sites-enabled/default || true
 nginx -t
 systemctl restart nginx
 # Usa staging opcionalmente para evitar limites durante testes
