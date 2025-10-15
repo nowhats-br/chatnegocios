@@ -22,20 +22,65 @@ const getLocalUser = () => {
 const makeSession = (user: any): Session => (user ? { user } : null);
 
 const supabase: any = {
-  // Database operations: no-op chainable to keep UI compiling
-  from(_table: string) {
-    const noop = async () => ({ data: [], error: null });
-    const noopSingle = async () => ({ data: null, error: null });
-    const chain: any = {
-      select: noop,
-      insert: noopSingle,
-      update: noopSingle,
-      delete: noopSingle,
-      order(_field: string, _opts: any) { return chain; },
-      eq(_field: string, _value: any) { return chain; },
-      single: noopSingle,
+  // Database operations: minimal thenable builder to keep UI compiling
+  from(table: string) {
+    const state: any = {
+      table,
+      action: null,
+      columns: '*',
+      payload: null,
+      filters: [] as Array<{ op: string; column: string; value: any }>,
+      orderBy: null as null | { column: string; opts: any },
+      single: false,
     };
-    return chain;
+
+    const builder: any = {
+      select(columns?: string) {
+        state.action = 'select';
+        state.columns = columns || '*';
+        return builder;
+      },
+      insert(payload: any) {
+        state.action = 'insert';
+        state.payload = payload;
+        return builder;
+      },
+      update(payload: any) {
+        state.action = 'update';
+        state.payload = payload;
+        return builder;
+      },
+      delete() {
+        state.action = 'delete';
+        state.payload = null;
+        return builder;
+      },
+      eq(column: string, value: any) {
+        state.filters.push({ op: 'eq', column, value });
+        return builder;
+      },
+      order(column: string, opts?: any) {
+        state.orderBy = { column, opts };
+        return builder;
+      },
+      single() {
+        state.single = true;
+        return builder;
+      },
+      // Thenable: allow awaiting the builder
+      then(onResolve: (value: any) => any, _onReject?: (reason: any) => any) {
+        const result = state.single ? { data: null, error: null } : { data: [], error: null };
+        return Promise.resolve(onResolve(result));
+      },
+      catch(_onReject: (reason: any) => any) {
+        return Promise.resolve(builder);
+      },
+      finally(_onFinally: () => any) {
+        return Promise.resolve(builder);
+      },
+    };
+
+    return builder;
   },
 
   // Auth wired to backend endpoints

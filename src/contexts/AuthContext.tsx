@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import { Loader2 } from 'lucide-react';
 
 interface LocalUser {
@@ -33,6 +34,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Subscribe to auth changes from local stub to update user after login/logout
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+      const newUser = session?.user || null;
+      setUser(newUser);
+    });
+    return () => {
+      try {
+        data?.subscription?.unsubscribe();
+      } catch (_) {
+        // ignore
+      }
+    };
   }, []);
 
   if (loading) {
