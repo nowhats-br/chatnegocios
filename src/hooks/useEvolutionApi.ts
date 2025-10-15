@@ -39,29 +39,59 @@ export function useEvolutionApi(): UseEvolutionApiReturn {
 
     try {
       const fullUrl = `${evolutionApiUrl}${endpoint}`;
+
+      const controller = new AbortController();
+      const timeoutMs = 20000; // 20s timeout para evitar espera excessiva
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      const isGet = !options.method || options.method.toString().toUpperCase() === 'GET';
+      const headers: HeadersInit = {
+        'Accept': 'application/json',
+        'apikey': evolutionApiKey,
+        ...(!isGet ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers || {}),
+      };
+
       const response = await fetch(fullUrl, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': evolutionApiKey,
-          ...options.headers,
-        },
+        headers,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        let errorData: EvolutionApiError;
-        try {
-          errorData = await response.json();
-        } catch {
-          errorData = { 
-            message: `Erro HTTP ${response.status}: ${response.statusText}`,
-            statusCode: response.status 
-          };
+        const contentType = response.headers.get('content-type') || '';
+        let errorData: EvolutionApiError = { message: `Erro HTTP ${response.status}: ${response.statusText}`, statusCode: response.status };
+        if (contentType.includes('application/json')) {
+          try {
+            errorData = await response.json();
+          } catch {
+            // mantém mensagem padrão
+          }
+        } else {
+          // Pode ser página de provedor (ex.: Render) indicando boot lento
+          const text = await response.text().catch(() => '');
+          if (text && /taking longer than expected to load/i.test(text)) {
+            errorData.message = 'O serviço Evolution API está iniciando/indisponível. Tente novamente em alguns minutos.';
+          } else if (text) {
+            errorData.message = `Resposta não-JSON (${response.status}): ${text.slice(0, 160)}...`;
+          }
         }
         const method = (options.method || 'GET').toString();
         const detailedMessage = `${errorData.message || `Erro na requisição: ${response.status}`}`+
           ` | URL: ${fullUrl} | Método: ${method}`;
         throw new Error(detailedMessage);
+      }
+
+      // Conteúdo deve ser JSON; se não for, tratar como erro com dica
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text().catch(() => '');
+        const method = (options.method || 'GET').toString();
+        const msg = text && /taking longer than expected to load/i.test(text)
+          ? 'O serviço Evolution API está iniciando/indisponível. Tente novamente em alguns minutos.'
+          : `Resposta não-JSON inesperada | URL: ${fullUrl} | Método: ${method} | Conteúdo: ${text.slice(0, 160)}...`;
+        throw new Error(msg);
       }
 
       const responseData: T = await response.json();
