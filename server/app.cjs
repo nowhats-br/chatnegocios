@@ -3,6 +3,7 @@ const express = require('express');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 // Single app server: serves SPA from dist and exposes webhook endpoint
@@ -46,6 +47,16 @@ async function ensureSchema() {
       instance_data JSONB
     );
   `);
+  // Users auth (local)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
   // Fase 1: Quick Responses e Tags
   await pool.query(`
     CREATE TABLE IF NOT EXISTS quick_responses (
@@ -80,6 +91,54 @@ ensureSchema().catch((err) => {
   console.error('[DB] Falha ao garantir schema:', err);
 });
 
+// Password hashing helpers (PBKDF2)
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const iterations = 120000; // OWASP recommended range
+  const keylen = 64;
+  const digest = 'sha512';
+  const derived = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest).toString('hex');
+  return `${salt}:${iterations}:${digest}:${derived}`;
+}
+
+function verifyPassword(password, stored) {
+  try {
+    const [salt, iterStr, digest, derived] = stored.split(':');
+    const iterations = parseInt(iterStr, 10);
+    const keylen = Buffer.from(derived, 'hex').length;
+    const check = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(check, 'hex'), Buffer.from(derived, 'hex'));
+  } catch (_) {
+    return false;
+  }
+}
+
+// Seed admin from environment
+async function ensureAdminSeed() {
+  if (!pool) return;
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminRole = process.env.ADMIN_ROLE || 'admin';
+  if (!adminEmail || !adminPassword) return;
+  try {
+    const { rows } = await pool.query('SELECT id FROM users WHERE email = $1', [adminEmail]);
+    if (rows.length === 0) {
+      const password_hash = hashPassword(adminPassword);
+      const ins = await pool.query(
+        'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
+        [adminEmail, password_hash, adminRole]
+      );
+      console.log(`[Auth] Usuário admin criado: ${ins.rows[0].email}`);
+    } else {
+      console.log('[Auth] Usuário admin já existe, não será recriado.');
+    }
+  } catch (err) {
+    console.error('[Auth] Falha ao criar admin:', err);
+  }
+}
+
+ensureAdminSeed();
+
 // Webhook endpoint
 app.post(WEBHOOK_PATH, (req, res) => {
   console.log(`[Webhook] Evento recebido em ${WEBHOOK_PATH}:`, {
@@ -91,6 +150,45 @@ app.post(WEBHOOK_PATH, (req, res) => {
 
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+
+// Auth API (local)
+app.post('/api/auth/signup', async (req, res) => {
+  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ message: 'email e password são obrigatórios' });
+  if (String(password).length < 6) return res.status(400).json({ message: 'senha deve ter ao menos 6 caracteres' });
+  try {
+    const exists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (exists.rows.length) return res.status(409).json({ message: 'E-mail já cadastrado' });
+    const password_hash = hashPassword(password);
+    const { rows } = await pool.query(
+      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
+      [email, password_hash, 'user']
+    );
+    res.status(201).json({ user: rows[0] });
+  } catch (err) {
+    console.error('[Auth] Erro no signup:', err);
+    res.status(500).json({ message: 'Erro ao cadastrar usuário' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ message: 'email e password são obrigatórios' });
+  try {
+    const { rows } = await pool.query('SELECT id, email, password_hash, role, created_at FROM users WHERE email = $1', [email]);
+    if (!rows.length) return res.status(401).json({ message: 'Credenciais inválidas' });
+    const userRow = rows[0];
+    const ok = verifyPassword(String(password), String(userRow.password_hash));
+    if (!ok) return res.status(401).json({ message: 'Credenciais inválidas' });
+    const { id, email: userEmail, role, created_at } = userRow;
+    res.json({ user: { id, email: userEmail, role, created_at } });
+  } catch (err) {
+    console.error('[Auth] Erro no login:', err);
+    res.status(500).json({ message: 'Erro ao efetuar login' });
+  }
+});
 
 // Connections API (PostgreSQL-backed)
 app.get('/api/connections', async (_req, res) => {

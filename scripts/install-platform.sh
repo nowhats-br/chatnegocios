@@ -26,6 +26,9 @@ EVO_DB_PASS="${EVO_DB_PASS:-Evolution123!}"
 EVO_APIKEY="${EVO_APIKEY:-}"
 EVO_IMAGE="${EVO_IMAGE:-atendai/evolution-api}"
 EVO_IMAGE_TAG="${EVO_IMAGE_TAG:-v2.1.1}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@nowhats.com.br}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
+ADMIN_ROLE="${ADMIN_ROLE:-admin}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -rp "Informe o domínio do ChatNegócios (ex: chat.seu-dominio.com): " CHAT_DOMAIN
@@ -195,6 +198,9 @@ services:
       PORT: 3000
       WEBHOOK_PATH: /api/evolution/webhook
       DATABASE_URL: postgres://chatnegocios:${CHAT_DB_PASS}@postgres-chatnegocios:5432/chatnegocios
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_ROLE: ${ADMIN_ROLE}
     depends_on:
       postgres-chatnegocios:
         condition: service_healthy
