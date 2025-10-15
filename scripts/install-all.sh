@@ -24,6 +24,8 @@ CHAT_DOMAIN="${CHAT_DOMAIN:-}"
 SSL_EMAIL="${SSL_EMAIL:-}"
 EVO_DOMAIN="${EVO_DOMAIN:-}"
 AUTO_GENERATE_EVO_TOKEN="${AUTO_GENERATE_EVO_TOKEN:-1}"
+CREATE_CATCH_ALL="${CREATE_CATCH_ALL:-0}"
+REMOVE_DEFAULT_SITE="${REMOVE_DEFAULT_SITE:-1}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -r -p "Informe o domínio para ChatNegócios (ex.: chat.seu-dominio.com): " CHAT_DOMAIN
@@ -70,6 +72,10 @@ fi
 
 EVO_TARGET_PORT="${EVO_TARGET_PORT:-8080}"
 CHAT_TARGET_PORT="${CHAT_TARGET_PORT:-3000}"
+EVO_DB_NAME="${EVO_DB_NAME:-evolution}"
+EVO_DB_USER="${EVO_DB_USER:-evolution}"
+EVO_DB_PASS="${EVO_DB_PASS:-Evolution123!}"
+EVO_DB_HOST_PORT="${EVO_DB_HOST_PORT:-5433}"
 
 echo "\nResumo da instalação:" 
 echo "- Domínio ChatNegócios: $CHAT_DOMAIN"
@@ -254,6 +260,29 @@ if [[ "$CHAT_HEALTH_OK" -ne 1 ]]; then
   echo "Verifique variáveis VITE_ e reconstrução da imagem." >&2
 fi
 
+echo "\n[4.5/8] Subindo Postgres para Evolution API..."
+docker network inspect chat_net >/dev/null 2>&1 || docker network create chat_net
+docker rm -f postgres-evolution || true
+docker run -d --name postgres-evolution --restart unless-stopped \
+  --network chat_net \
+  -e POSTGRES_DB="$EVO_DB_NAME" -e POSTGRES_USER="$EVO_DB_USER" -e POSTGRES_PASSWORD="$EVO_DB_PASS" \
+  -v evo_pgdata:/var/lib/postgresql/data \
+  -p 127.0.0.1:${EVO_DB_HOST_PORT}:5432 postgres:15-alpine
+echo "Aguardando Postgres Evolution ficar saudável..."
+EVO_PG_HEALTH_OK=0
+for i in $(seq 1 30); do
+  if docker exec postgres-evolution pg_isready -U "$EVO_DB_USER" -d "$EVO_DB_NAME" >/dev/null 2>&1; then
+    EVO_PG_HEALTH_OK=1
+    echo "Postgres Evolution respondeu."
+    break
+  fi
+  sleep 2
+done
+if [[ "$EVO_PG_HEALTH_OK" -ne 1 ]]; then
+  echo "[ERRO] Postgres Evolution não ficou saudável a tempo." >&2
+fi
+EVO_DATABASE_URL="postgres://${EVO_DB_USER}:${EVO_DB_PASS}@127.0.0.1:${EVO_DB_HOST_PORT}/${EVO_DB_NAME}"
+
 echo "\n[5/8] Configurando Nginx e SSL para ${CHAT_DOMAIN}..."
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || true
 CHAT_SITE="/etc/nginx/sites-available/${CHAT_DOMAIN}.conf"
@@ -289,11 +318,14 @@ server {
 EOF
 
 ln -sf "$CHAT_SITE" "$CHAT_LINK"
-rm -f /etc/nginx/sites-enabled/default || true
+if [[ "${REMOVE_DEFAULT_SITE:-1}" -eq 1 ]]; then
+  rm -f /etc/nginx/sites-enabled/default || true
+fi
 
-# Criar um vhost catch-all para evitar que domínios não configurados caiam na SPA
-CATCH_ALL="/etc/nginx/sites-available/00-catch-all.conf"
-cat > "$CATCH_ALL" <<'EOF'
+# Opcional: vhost catch-all para bloquear domínios não configurados
+if [[ "${CREATE_CATCH_ALL:-0}" -eq 1 ]]; then
+  CATCH_ALL="/etc/nginx/sites-available/00-catch-all.conf"
+  cat > "$CATCH_ALL" <<'EOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -301,7 +333,8 @@ server {
     return 444;
 }
 EOF
-ln -sf "$CATCH_ALL" "/etc/nginx/sites-enabled/00-catch-all.conf"
+  ln -sf "$CATCH_ALL" "/etc/nginx/sites-enabled/00-catch-all.conf"
+fi
 
 nginx -t
 systemctl restart nginx
@@ -325,12 +358,37 @@ rm -rf "$EVO_DIR"
 git clone https://github.com/EvolutionAPI/evolution-api.git "$EVO_DIR"
 cd "$EVO_DIR"
  
- # Criar .env padrão se não existir (SQLite local) para evitar falha do Prisma
- if [[ ! -f .env ]]; then
-   cat > .env <<'EOF'
-DATABASE_URL="file:./dev.db"
-EOF
+ # Harmonizar Docker Compose (remover 'version' obsoleto e silenciar avisos de env)
+ COMPOSE_FILES=(docker-compose.yml docker-compose.yaml compose.yml compose.yaml)
+ for cf in "${COMPOSE_FILES[@]}"; do
+   if [[ -f "$cf" ]]; then
+     # Remove a linha 'version:' que é obsoleta no Compose V2
+     sed -i '/^[[:space:]]*version[[:space:]]*:/d' "$cf" || true
+   fi
+ done
+ 
+ # Configurar .env da Evolution para usar PostgreSQL em vez de SQLite
+ if [[ -f .env ]]; then
+   if grep -qE '^DATABASE_URL=' .env; then
+     sed -i "s|^DATABASE_URL=.*$|DATABASE_URL=\"${EVO_DATABASE_URL}\"|" .env || true
+   else
+     echo "DATABASE_URL=\"${EVO_DATABASE_URL}\"" >> .env
+   fi
+ else
+   echo "DATABASE_URL=\"${EVO_DATABASE_URL}\"" > .env
  fi
+
+ # Garantir variáveis esperadas pelo docker compose para evitar WARN
+ # Não sobrescreve valores existentes; apenas adiciona se faltarem
+ ensure_env_var() {
+   local key="$1"; local value="$2"
+   if ! grep -qE "^${key}=" ".env" 2>/dev/null; then
+     echo "${key}=${value}" >> ".env"
+   fi
+ }
+ensure_env_var "POSTGRES_DATABASE" "evolution"
+ensure_env_var "POSTGRES_USERNAME" "evolution"
+ensure_env_var "POSTGRES_PASSWORD" "Evolution123!"
 
 # Injetar a mesma apikey no .env da Evolution para garantir consistência
 if [[ "${AUTO_GENERATE_EVO_TOKEN}" -eq 1 && -n "$EVO_APIKEY" ]]; then
@@ -377,8 +435,8 @@ else
   echo "[AVISO] Prisma schema ausente ou npx indisponível. Pulando migrações/sincronização." >&2
 fi
 
-# Iniciar informando porta via variáveis de ambiente
-PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
+# Iniciar informando porta e DATABASE_URL via variáveis de ambiente
+DATABASE_URL=${EVO_DATABASE_URL} PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
 pm2 save || true
 # Garante que as variáveis de ambiente sejam aplicadas ao processo
 pm2 restart evolution-api --update-env || true
@@ -463,7 +521,9 @@ server {
 EOF
 
 ln -sf "$EVO_SITE" "$EVO_LINK"
-rm -f /etc/nginx/sites-enabled/default || true
+if [[ "${REMOVE_DEFAULT_SITE:-1}" -eq 1 ]]; then
+  rm -f /etc/nginx/sites-enabled/default || true
+fi
 nginx -t
 systemctl restart nginx
 # Usa staging opcionalmente para evitar limites durante testes
