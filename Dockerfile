@@ -28,9 +28,8 @@ RUN npm prune --production
 COPY server ./server
 COPY --from=builder /app/dist ./dist
 
-# Runtime envs for webhook and server
+# Runtime envs for server
 ENV PORT=3000
-ENV WEBHOOK_PORT=3000
 ENV WEBHOOK_PATH=/api/evolution/webhook
 
 EXPOSE 3000

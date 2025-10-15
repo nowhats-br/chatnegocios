@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
+// Migração Supabase -> Express: usar endpoints /api/tags
 import { Tag } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -61,19 +61,34 @@ const TagForm: React.FC<TagFormProps> = ({ isOpen, onClose, tag, onSuccess }) =>
     }
     setIsSubmitting(true);
     try {
-      let result;
       const tagData = { ...data, user_id: user.id };
-      
+      let saved: Tag | null = null;
       if (tag) {
-        result = await supabase.from('tags').update(tagData).eq('id', tag.id).select().single();
+        const res = await fetch(`/api/tags/${tag.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tagData),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+          throw new Error(errData.message);
+        }
+        saved = await res.json();
       } else {
-        result = await supabase.from('tags').insert(tagData).select().single();
+        const res = await fetch('/api/tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tagData),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+          throw new Error(errData.message);
+        }
+        saved = await res.json();
       }
 
-      if (result.error) throw result.error;
-      
       toast.success(`Etiqueta ${tag ? 'atualizada' : 'criada'} com sucesso!`);
-      onSuccess(result.data);
+      onSuccess(saved as Tag);
       onClose();
 
     } catch (error: any) {

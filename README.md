@@ -23,8 +23,7 @@ Este projeto integra um frontend (Vite/React) com um backend Express e a Evoluti
 ## Variáveis de Runtime
 
 - `PORT`: Porta do servidor principal (Express).
-- `WEBHOOK_PORT`: Porta do servidor de webhook.
-- `WEBHOOK_PATH`: Caminho do webhook (ex.: `/webhook`).
+- `WEBHOOK_PATH`: Caminho do webhook (ex.: `/api/evolution/webhook`).
 - `DATABASE_URL`: URL de conexão PostgreSQL (ex.: `postgres://user:pass@host:5432/dbname`).
 
 Em produção, recomenda-se `sslmode=require` caso o provedor exija TLS: `postgres://.../?sslmode=require`.
@@ -43,18 +42,17 @@ environment:
 
   # Runtime
   PORT: "3000"
-  WEBHOOK_PORT: "3001"
-  WEBHOOK_PATH: "/webhook"
+  WEBHOOK_PATH: "/api/evolution/webhook"
   DATABASE_URL: "postgres://user:pass@db:5432/app"
 ```
 
 Certifique-se de que o serviço de banco (`db`) está configurado e acessível pela aplicação.
 
-## Migração do Supabase
+## Supabase (Opcional)
 
 - As operações de listar, criar, atualizar status e excluir connections foram migradas para o backend Express com PostgreSQL.
-- Remova variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` do ambiente de build.
-- Verifique `src/pages/Connections.tsx` para confirmar o uso dos novos endpoints.
+- O projeto mantém integração opcional com Supabase para alguns recursos do frontend (ex.: Kanban, etiquetas, filas, respostas rápidas). Caso não configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`, o app utiliza um stub local sem persistência para essas áreas.
+- As variáveis do Supabase foram removidas de `.env.example`. Configure-as apenas se precisar de persistência via Supabase para esses recursos.
 
 ## Desenvolvimento
 

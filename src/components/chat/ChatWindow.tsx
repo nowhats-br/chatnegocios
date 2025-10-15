@@ -1,11 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Conversation } from '@/types/database';
-type QuickResponse = {
-  id: string;
-  shortcut: string;
-  message: string;
-};
+import { Conversation, QuickResponse } from '@/types/database';
 import { Message } from '@/types/chat';
 import { toast } from 'sonner';
 import { User, MoreVertical, Loader2, FileText, Download } from 'lucide-react';
@@ -53,11 +48,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
   }, []);
 
   const fetchQuickResponses = useCallback(async () => {
-    const { data, error } = await supabase.from('quick_responses').select('*');
-    if (error) {
-        toast.error('Erro ao buscar mensagens rápidas.');
-    } else {
-        setQuickResponses(data);
+    try {
+      const res = await fetch('/api/quick-responses');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: QuickResponse[] = await res.json();
+      setQuickResponses(data);
+    } catch (err: any) {
+      toast.error('Erro ao buscar mensagens rápidas.', { description: err.message });
+      setQuickResponses([]);
     }
   }, []);
 

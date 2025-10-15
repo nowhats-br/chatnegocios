@@ -9,7 +9,6 @@ dist
 Dockerfile*
 README.md
 *.md
-supabase
 scripts/install-ubuntu.sh
 server/webhook
 **/*.test.*

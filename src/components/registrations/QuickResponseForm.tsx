@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
+// Migração Supabase -> Express: usar endpoints /api/quick-responses
 import { QuickResponse } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -49,19 +49,34 @@ const QuickResponseForm: React.FC<QuickResponseFormProps> = ({ isOpen, onClose, 
     }
     setIsSubmitting(true);
     try {
-      let result;
       const responseData = { ...data, user_id: user.id };
-
+      let saved: QuickResponse | null = null;
       if (quickResponse) {
-        result = await supabase.from('quick_responses').update(responseData).eq('id', quickResponse.id).select().single();
+        const res = await fetch(`/api/quick-responses/${quickResponse.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+          throw new Error(errData.message);
+        }
+        saved = await res.json();
       } else {
-        result = await supabase.from('quick_responses').insert(responseData).select().single();
+        const res = await fetch('/api/quick-responses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(responseData),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+          throw new Error(errData.message);
+        }
+        saved = await res.json();
       }
 
-      if (result.error) throw result.error;
-      
       toast.success(`Mensagem rápida ${quickResponse ? 'atualizada' : 'criada'} com sucesso!`);
-      onSuccess(result.data);
+      onSuccess(saved as QuickResponse);
       onClose();
 
     } catch (error: any) {

@@ -10,7 +10,7 @@ set -euo pipefail
 # - Constrói e roda o container do ChatNegócios (porta interna 3000)
 # - Configura Nginx com SSL para o domínio informado e proxy para o container
 # - Clona e inicia Evolution API (via Docker Compose se disponível, senão via npm/PM2)
-# - Configura Nginx com SSL para api.nowhats.com.br
+# - Configura Nginx com SSL para a Evolution API (EVO_DOMAIN)
 # - Sobrescreve configurações existentes de Nginx e serviços, prossegue automaticamente
 
 if [[ $EUID -ne 0 ]]; then
@@ -23,6 +23,7 @@ APP_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 CHAT_DOMAIN="${CHAT_DOMAIN:-}"
 SSL_EMAIL="${SSL_EMAIL:-}"
 EVO_DOMAIN="${EVO_DOMAIN:-}"
+AUTO_GENERATE_EVO_TOKEN="${AUTO_GENERATE_EVO_TOKEN:-1}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -r -p "Informe o domínio para ChatNegócios (ex.: chat.seu-dominio.com): " CHAT_DOMAIN
@@ -61,6 +62,12 @@ if [[ -z "$EVO_DOMAIN" ]]; then
   exit 1
 fi
 
+# Evitar conflito de domínio entre ChatNegócios e Evolution API
+if [[ "$EVO_DOMAIN" == "$CHAT_DOMAIN" ]]; then
+  echo "[ERRO] EVO_DOMAIN deve ser diferente de CHAT_DOMAIN para evitar conflito de vhost/UI." >&2
+  exit 1
+fi
+
 EVO_TARGET_PORT=8080
 CHAT_TARGET_PORT=3000
 
@@ -70,13 +77,6 @@ echo "- E-mail SSL: $SSL_EMAIL"
 echo "- Domínio Evolution API: $EVO_DOMAIN"
 echo "- Portas internas: Chat=3000, Evolution=$EVO_TARGET_PORT (forçado)"
 
-# Dica de migração: domínios nowhats
-if [[ "$EVO_DOMAIN" == "evo.nowhats.com.br" ]]; then
-  echo "[AVISO] Detectado domínio antigo (evo.nowhats.com.br). Recomenda-se usar api.nowhats.com.br."
-fi
-if [[ "$CHAT_DOMAIN" == "chat.nowhats.com.br" ]]; then
-  echo "[AVISO] Detectado domínio antigo (chat.nowhats.com.br). Recomenda-se usar chatnegocios.nowhats.com.br."
-fi
 
 echo "\n[0/8] Limpando instalação anterior..."
 # Docker: parar/remover containers e imagens
@@ -182,14 +182,25 @@ else
   # Cria um básico vazio para não quebrar o build; usuário ajusta depois
   cat > "$APP_DIR/.env.production" <<'EOF'
 # Preencha os valores VITE_* conforme necessário
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
 VITE_EVOLUTION_API_URL=
 VITE_EVOLUTION_API_KEY=
 VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE=
 VITE_EVOLUTION_WEBHOOK_URL=
 EOF
   ENV_FILE="$APP_DIR/.env.production"
+fi
+
+# Gerar/injetar apikey e URL da Evolution no arquivo .env usado no build
+EVO_APIKEY=""
+if [[ "${AUTO_GENERATE_EVO_TOKEN}" -eq 1 ]]; then
+  if command -v openssl >/dev/null 2>&1; then
+    EVO_APIKEY="$(openssl rand -hex 24)"
+  else
+    EVO_APIKEY="$(date +%s%N | sha256sum | cut -c1-48)"
+  fi
+  bash "$APP_DIR/scripts/generate-evo-token.sh" --domain "$EVO_DOMAIN" --vite-env "$ENV_FILE" --apikey "$EVO_APIKEY" --webhook-url "https://${CHAT_DOMAIN}/api/evolution/webhook" || true
+else
+  echo "[AVISO] AUTO_GENERATE_EVO_TOKEN=0 — pulando geração automática de apikey Evolution."
 fi
 
 docker rm -f chatnegocios || true
@@ -320,6 +331,11 @@ cd "$EVO_DIR"
 DATABASE_URL="file:./dev.db"
 EOF
  fi
+
+# Injetar a mesma apikey no .env da Evolution para garantir consistência
+if [[ "${AUTO_GENERATE_EVO_TOKEN}" -eq 1 && -n "$EVO_APIKEY" ]]; then
+  bash "$APP_DIR/scripts/generate-evo-token.sh" --domain "$EVO_DOMAIN" --evo-dir "$EVO_DIR" --apikey "$EVO_APIKEY" || true
+fi
 
 # Iniciar Evolution API via npm/PM2 (fixa porta 8080 no host)
 echo "Instalando Node.js 20+ para Evolution API..."
@@ -488,5 +504,8 @@ echo "\nImportante:"
 echo "- Variáveis VITE_* são de build; ajuste .env e rode rebuild se precisar:"
 echo "  docker rm -f chatnegocios && cd $APP_DIR && docker build --no-cache -t chatnegocios:latest . && docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest"
 echo "- Configure o mesmo endpoint em VITE_EVOLUTION_WEBHOOK_URL e no Manager Evolution."
+if [[ "${AUTO_GENERATE_EVO_TOKEN}" -eq 1 ]]; then
+  echo "- Apikey Evolution gerada automaticamente e aplicada no build (.env) e Evolution (.env)."
+fi
 
 echo "\nInstalação concluída com sucesso!"

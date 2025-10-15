@@ -8,7 +8,7 @@ export const API_ENDPOINTS = {
   INSTANCE_CREATE: '/instance/create',
 
   /**
-   * Endpoint to connect and get QR code for a specific instance.
+   * Endpoint to get the connection status for a specific instance.
    * @param instanceName The name of the WhatsApp instance.
    */
   INSTANCE_CONNECT: (instanceName: string) => `/instance/connect/${instanceName}`,
