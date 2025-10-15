@@ -68,8 +68,8 @@ if [[ "$EVO_DOMAIN" == "$CHAT_DOMAIN" ]]; then
   exit 1
 fi
 
-EVO_TARGET_PORT=8080
-CHAT_TARGET_PORT=3000
+EVO_TARGET_PORT="${EVO_TARGET_PORT:-8080}"
+CHAT_TARGET_PORT="${CHAT_TARGET_PORT:-3000}"
 
 echo "\nResumo da instalação:" 
 echo "- Domínio ChatNegócios: $CHAT_DOMAIN"
@@ -380,6 +380,8 @@ fi
 # Iniciar informando porta via variáveis de ambiente
 PORT=${EVO_TARGET_PORT} APP_PORT=${EVO_TARGET_PORT} pm2 start npm --name evolution-api -- start || true
 pm2 save || true
+# Garante que as variáveis de ambiente sejam aplicadas ao processo
+pm2 restart evolution-api --update-env || true
 
 echo "Evolution API será exposta internamente na porta fixa ${EVO_TARGET_PORT}."
 
@@ -406,6 +408,10 @@ if [[ "$EVO_HEALTH_OK" -ne 1 ]]; then
   echo "[ALERTA] Evolution API não confirmou saúde a tempo. Tentando auto-detectar porta real." >&2
   # Auto-detecção de porta: verifica portas comuns e ajusta upstream se encontrar resposta
   for p in 8080 4020 4001 4000 3000; do
+    # Evita falso-positivo na porta do ChatNegócios
+    if [[ "$p" -eq "$CHAT_TARGET_PORT" ]]; then
+      continue
+    fi
     if curl -sf "http://127.0.0.1:${p}/health" >/dev/null 2>&1 || curl -sf "http://127.0.0.1:${p}/" >/dev/null 2>&1; then
       EVO_TARGET_PORT="$p"
       echo "[INFO] Detectado Evolution API respondendo na porta ${EVO_TARGET_PORT}. Upstream ajustado."

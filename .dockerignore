@@ -9,7 +9,6 @@ dist
 Dockerfile*
 README.md
 *.md
-scripts/install-ubuntu.sh
 server/webhook
 **/*.test.*
 coverage
