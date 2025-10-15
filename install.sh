@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Instalador bootstrap: clona o projeto na HOME do usuário correto
-# e executa o instalador completo (scripts/install-all.sh).
+# e executa o instalador de plataforma (scripts/install-platform.sh).
 
 log() {
   echo "[install.sh] $*"
@@ -42,13 +42,14 @@ fi
 # Coleta de variáveis de ambiente (ou prompt)
 CHAT_DOMAIN="${CHAT_DOMAIN:-}"
 SSL_EMAIL="${SSL_EMAIL:-}"
+ACME_EMAIL="${ACME_EMAIL:-$SSL_EMAIL}"
 EVO_DOMAIN="${EVO_DOMAIN:-}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -rp "Informe o domínio do ChatNegócios (ex: chat.seu-dominio.com): " CHAT_DOMAIN
 fi
-if [[ -z "$SSL_EMAIL" ]]; then
-  read -rp "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
+if [[ -z "$ACME_EMAIL" ]]; then
+  read -rp "Informe o e-mail para SSL (Let's Encrypt): " ACME_EMAIL
 fi
 if [[ -z "$EVO_DOMAIN" ]]; then
   read -rp "Informe o domínio para Evolution API (ex: api.seu-dominio.com): " EVO_DOMAIN
@@ -56,7 +57,7 @@ fi
 
 # Detectar se já estamos dentro de um clone existente
 CURRENT_DIR="$(pwd)"
-if [[ -f "$CURRENT_DIR/scripts/install-all.sh" ]]; then
+if [[ -f "$CURRENT_DIR/scripts/install-platform.sh" ]]; then
   TARGET_DIR="$CURRENT_DIR"
   log "Repositório já presente no diretório atual: '$TARGET_DIR'. Pulando clone."
 else
@@ -78,8 +79,8 @@ if [[ ! -d "$TARGET_DIR/scripts" ]]; then
   exit 1
 fi
 
-log "Executando instalador completo (scripts/install-all.sh)..."
-export CHAT_DOMAIN SSL_EMAIL EVO_DOMAIN
-bash "$TARGET_DIR/scripts/install-all.sh"
+log "Executando instalador de plataforma (scripts/install-platform.sh)..."
+export CHAT_DOMAIN ACME_EMAIL EVO_DOMAIN SSL_EMAIL
+bash "$TARGET_DIR/scripts/install-platform.sh"
 
 log "Instalação concluída."
