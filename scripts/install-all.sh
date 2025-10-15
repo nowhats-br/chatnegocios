@@ -117,15 +117,21 @@ docker builder prune -af || true
 echo "\n[1/8] Atualizando pacotes e instalando dependências (modo rápido)..."
 # Modo rápido: reduzir travas de rede e desabilitar fontes lentas
 export DEBIAN_FRONTEND=noninteractive
-APT_OPTS="-o Dpkg::Use-Pty=0 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=1 -o Acquire::Check-Valid-Until=false -o Acquire::http::No-Cache=true"
+APT_OPTS="-o Dpkg::Use-Pty=0 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=1 -o Acquire::Check-Valid-Until=false -o Acquire::http::No-Cache=true -o Acquire::ForceIPv4=true"
 
 # Desabilitar repositórios NodeSource se presentes (evita lentidão em \"nodistro\")
 if [[ -f /etc/apt/sources.list.d/nodesource.list || -f /etc/apt/sources.list.d/nodesource.sources ]]; then
   echo "[INFO] Desabilitando NodeSource para evitar lentidão..."
   rm -f /etc/apt/sources.list.d/nodesource.list /etc/apt/sources.list.d/nodesource.sources || true
 fi
-# Comentar qualquer linha de nodesource em outras listas
-grep -Rl "deb.nodesource.com" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | xargs -r sed -i 's/^/# desabilitado pelo instalador: /'
+# Reparar possíveis fontes comentadas indevidamente por versões anteriores do instalador
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+  [[ -f "$f" ]] && sed -i 's/^# desabilitado pelo instalador: //g' "$f"
+done
+# Comentar apenas linhas que referenciam NodeSource (sem afetar outras fontes)
+while IFS= read -r f; do
+  sed -i '/deb\.nodesource\.com/ s/^/# desabilitado pelo instalador: /' "$f"
+done < <(grep -Rl "deb.nodesource.com" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true)
 
 echo "[INFO] Executando apt-get update com timeout (60s)..."
 timeout 60s apt-get update $APT_OPTS || echo "[WARN] apt-get update lento ou falhou; prosseguindo com cache atual."
@@ -135,13 +141,28 @@ apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-releas
 
 echo "\n[2/8] Instalando Docker e Compose (modo rápido)..."
 if ! command -v docker >/dev/null 2>&1; then
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-  echo "[INFO] Atualizando índices do Docker com timeout (60s)..."
-  timeout 60s apt-get update $APT_OPTS || echo "[WARN] update do Docker lento; tentando instalar diretamente."
-  apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin $APT_OPTS || true
+  echo "[INFO] Instalando Docker via script oficial (get.docker.com) — caminho mais rápido."
+  if curl -fsSL https://get.docker.com -o /tmp/getdocker.sh; then
+    sh /tmp/getdocker.sh || echo "[WARN] Falha no script oficial; tentando via repositório apt."
+  else
+    echo "[WARN] Não foi possível baixar get.docker.com; tentando via repositório apt."
+  fi
+  # Fallback apt para Docker caso o script não tenha instalado
+  if ! command -v docker >/dev/null 2>&1; then
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    echo "[INFO] Atualizando índices do Docker com timeout (60s)..."
+    timeout 60s apt-get update $APT_OPTS || echo "[WARN] update do Docker lento; tentando instalar diretamente."
+    apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin $APT_OPTS || true
+  fi
+fi
+
+# Garantir que o plugin docker compose esteja disponível
+if ! docker compose version >/dev/null 2>&1; then
+  echo "[INFO] Instalando plugin docker-compose-plugin (se ausente)"
+  apt-get install -y --no-install-recommends docker-compose-plugin $APT_OPTS || true
 fi
 systemctl enable --now docker || true
 
