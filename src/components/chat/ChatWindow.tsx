@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Conversation, Message, QuickResponse } from '@/types/database';
+import { Conversation } from '@/types/database';
+type QuickResponse = {
+  id: string;
+  shortcut: string;
+  message: string;
+};
+import { Message } from '@/types/chat';
 import { toast } from 'sonner';
 import { User, MoreVertical, Loader2, FileText, Download } from 'lucide-react';
 import Button from '@/components/ui/Button';
@@ -35,7 +41,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const fetchMessages = useCallback(async (conversationId: string) => {
+  const fetchMessages = useCallback(async (conversationId: number) => {
     setLoading(true);
     const { data, error } = await supabase
       .from('messages')
@@ -74,11 +80,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
   useEffect(() => {
     const channel = supabase
       .channel(`messages:${conversation.id}`)
-      .on<Message>(
+      .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversation.id}` },
-        (payload) => {
-          setMessages((prevMessages) => [...prevMessages, payload.new]);
+        (payload: any) => {
+          const newMsg = payload?.new as Message;
+          if (newMsg) {
+            setMessages((prevMessages) => [...prevMessages, newMsg]);
+          }
         }
       )
       .subscribe();
@@ -86,7 +95,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversation.id, user?.id]);
+  }, [conversation.id]);
 
   const handleLocalSendMessage = async (content: string) => {
     if (!user) return;
