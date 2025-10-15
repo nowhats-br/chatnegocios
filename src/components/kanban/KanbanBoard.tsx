@@ -35,7 +35,7 @@ const KanbanBoard: React.FC = () => {
     resolved: [],
   });
   const [loading, setLoading] = useState(true);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<number | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -55,12 +55,11 @@ const KanbanBoard: React.FC = () => {
     if (error) {
       toast.error('Erro ao buscar conversas para o Kanban', { description: error.message });
     } else {
-      const grouped = data.reduce((acc, convo) => {
-        const status = convo.status || 'new';
-        if (!acc[status]) acc[status] = [];
-        acc[status].push(convo as Conversation);
-        return acc;
-      }, {} as ConversationMap);
+      const grouped: ConversationMap = { new: [], active: [], pending: [], resolved: [] };
+      (data as Conversation[]).forEach((convo) => {
+        const status = (convo.status ?? 'new') as ConversationStatus;
+        grouped[status].push(convo);
+      });
 
       setConversations({
         new: grouped.new || [],
@@ -79,7 +78,7 @@ const KanbanBoard: React.FC = () => {
   useEffect(() => {
     const channel = supabase
       .channel('kanban-conversations-changes')
-      .on<Conversation>(
+      .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations' },
         () => {
@@ -93,12 +92,13 @@ const KanbanBoard: React.FC = () => {
     };
   }, [fetchConversations]);
 
-  const findContainer = (id: string): ConversationStatus | undefined => {
+  const findContainer = (id: string | number): ConversationStatus | undefined => {
     if (columns.some(c => c.id === id)) {
       return id as ConversationStatus;
     }
+    const convId = typeof id === 'string' ? Number(id) : id;
     for (const status of Object.keys(conversations) as ConversationStatus[]) {
-      if (conversations[status].find((c) => c.id === id)) {
+      if (conversations[status].find((c) => c.id === convId)) {
         return status;
       }
     }
@@ -106,7 +106,8 @@ const KanbanBoard: React.FC = () => {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
+    const id = event.active.id;
+    setActiveId(typeof id === 'string' ? Number(id) : id);
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -115,7 +116,7 @@ const KanbanBoard: React.FC = () => {
 
     if (!over) return;
 
-    const originalContainer = findContainer(active.id as string);
+    const originalContainer = findContainer(active.id);
     const newContainerId = over.id as string;
     const newContainer = findContainer(newContainerId);
 
@@ -123,7 +124,7 @@ const KanbanBoard: React.FC = () => {
       return;
     }
 
-    const conversationId = active.id as string;
+    const conversationId = typeof active.id === 'string' ? Number(active.id) : (active.id as number);
     const newStatus = newContainer as ConversationStatus;
 
     // Optimistic update

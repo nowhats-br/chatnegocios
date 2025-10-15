@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 
 interface ConversationListProps {
   conversations: Conversation[];
-  activeConversationId?: string;
+  activeConversationId?: number;
   onSelectConversation: (conversation: Conversation) => void;
   loading: boolean;
   activeFilter: ConversationStatus;
@@ -84,7 +84,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between">
                   <p className="font-semibold truncate">{convo.contacts?.name || 'Desconhecido'}</p>
-                  <p className="text-xs text-muted-foreground flex-shrink-0">{new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+                  <p className="text-xs text-muted-foreground flex-shrink-0">
+                    {convo.updated_at ? new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}
+                  </p>
                 </div>
                 <p className="text-sm text-muted-foreground truncate">Última mensagem aqui...</p>
               </div>

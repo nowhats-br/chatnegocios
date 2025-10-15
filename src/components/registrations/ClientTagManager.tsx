@@ -33,7 +33,9 @@ const ClientTagManager: React.FC<ClientTagManagerProps> = ({ isOpen, onClose, cl
         setAllTags(allTagsData);
       }
 
-      const initialTagIds = new Set(client.contact_tags.map(ct => ct.tags.id));
+      const initialTagIds: Set<string> = new Set(
+        (client.contact_tags || []).map((ct) => ct.tags.id)
+      );
       setClientTagIds(initialTagIds);
 
       setLoading(false);

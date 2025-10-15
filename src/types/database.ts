@@ -17,14 +17,26 @@ export interface Connection {
   instance_data?: unknown;
 }
 
-export type ConversationStatus = 'active' | 'resolved';
+export type ConversationStatus = 'new' | 'active' | 'pending' | 'resolved';
 
 export type MessageType = 'text' | 'image' | 'file';
 
+export interface Tag {
+  id: string;
+  name: string;
+  color?: string | null;
+}
+
+export interface ContactTagRelation {
+  tags: Tag;
+}
+
 export interface Contact {
+  id: number;
   name?: string;
-  avatar_url?: string;
-  phone_number?: string;
+  avatar_url?: string | null;
+  phone_number?: string | null;
+  contact_tags?: ContactTagRelation[];
 }
 
 export interface Conversation {
@@ -41,4 +53,19 @@ export interface Product {
   description?: string;
   price: number;
   image_url?: string;
+  stock?: number;
+}
+
+export interface Queue {
+  id: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface QuickResponse {
+  id: number;
+  shortcut: string;
+  message: string;
+  user_id?: string;
+  created_at?: string;
 }
