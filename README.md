@@ -1,6 +1,6 @@
 # ChatNegócios – Guia de Configuração
 
-Este projeto integra um frontend (Vite/React) com um backend Express e a Evolution API para criar e gerenciar "connections" (instâncias) e processar mensagens via webhook. O armazenamento das connections agora é feito em PostgreSQL. Supabase não é mais utilizado para CRUD de connections.
+Este projeto integra um frontend (Vite/React) com um backend Express e a Evolution API para criar e gerenciar "connections" (instâncias) e processar mensagens via webhook. O armazenamento das connections e a autenticação são feitos exclusivamente em PostgreSQL via Express. Supabase foi removido completamente.
 
 ## Visão Geral
 
@@ -48,11 +48,11 @@ environment:
 
 Certifique-se de que o serviço de banco (`db`) está configurado e acessível pela aplicação.
 
-## Supabase (Opcional)
+## Autenticação
 
-- As operações de listar, criar, atualizar status e excluir connections foram migradas para o backend Express com PostgreSQL.
-- O projeto mantém integração opcional com Supabase para alguns recursos do frontend (ex.: Kanban, etiquetas, filas, respostas rápidas). Caso não configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`, o app utiliza um stub local sem persistência para essas áreas.
-- As variáveis do Supabase foram removidas de `.env.example`. Configure-as apenas se precisar de persistência via Supabase para esses recursos.
+- Endpoints locais: `POST /api/auth/signup` e `POST /api/auth/login` (ver `server/app.cjs`).
+- O frontend armazena o usuário autenticado em `localStorage` (`auth_user`) e protege rotas via `AuthContext` + `ProtectedRoute`.
+- Não há confirmação por e-mail; após signup, faça login diretamente.
 
 ## Desenvolvimento
 

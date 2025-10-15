@@ -1,38 +1,38 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
 import { Loader2 } from 'lucide-react';
 
-interface AuthContextType {
-  session: Session | null;
-  user: User | null;
+interface LocalUser {
+  id: number;
+  email: string;
+  role?: string;
 }
 
-const AuthContext = createContext<AuthContextType>({ session: null, user: null });
+interface AuthContextType {
+  user: LocalUser | null;
+}
+
+const AuthContext = createContext<AuthContextType>({ user: null });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setUser(session?.user ?? null);
+    try {
+      const raw = localStorage.getItem('auth_user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.id !== 'undefined' && parsed.email) {
+          setUser(parsed);
+        } else {
+          localStorage.removeItem('auth_user');
+        }
+      }
+    } catch (_) {
+      // ignore
+    } finally {
       setLoading(false);
-    };
-
-    getSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      subscription?.unsubscribe();
-    };
+    }
   }, []);
 
   if (loading) {
@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   return (
-    <AuthContext.Provider value={{ session, user }}>
+    <AuthContext.Provider value={{ user }}>
       {children}
     </AuthContext.Provider>
   );

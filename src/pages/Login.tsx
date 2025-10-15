@@ -28,13 +28,10 @@ const Login: React.FC = () => {
         const { error: signUpError } = await supabase.auth.signUp({ 
           email, 
           password,
-          options: {
-            emailRedirectTo: window.location.origin
-          }
         });
         if (!signUpError) {
           toast.success('Cadastro realizado!', {
-            description: 'Enviamos um link de confirmação para o seu e-mail.',
+            description: 'Agora faça login com seu e-mail e senha.',
           });
           setMode('signIn');
         }

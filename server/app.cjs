@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
@@ -17,6 +18,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan('combined'));
+app.use(cors());
 
 // Database setup
 let pool = null;
@@ -146,6 +148,60 @@ app.post(WEBHOOK_PATH, (req, res) => {
     body: req.body,
   });
   res.status(200).json({ status: 'ok' });
+});
+
+// -----------------------------
+// Mock Evolution API (dev only)
+// -----------------------------
+// These endpoints simulate Evolution API responses for local testing.
+// Point VITE_EVOLUTION_API_URL to "http://localhost:3000/mock-evo" in development.
+
+app.post('/mock-evo/instance/create', (req, res) => {
+  const body = req.body || {};
+  const instanceName = body.instanceName || 'instance_dev';
+  return res.status(201).json({
+    instance: {
+      instanceName,
+      status: 'DISCONNECTED',
+    },
+    hash: { apikey: 'mocked-api-key-123' },
+    webhook: {
+      url: body.webhook?.url || '',
+      enabled: !!body.webhook?.enabled,
+    },
+  });
+});
+
+app.get('/mock-evo/instance/connect/:instance', (req, res) => {
+  const { instance } = req.params;
+  return res.json({
+    instance: { instanceName: instance, status: 'CONNECTING' },
+    message: 'Mock connect initialized',
+  });
+});
+
+app.get('/mock-evo/instance/qrCode/:instance', (req, res) => {
+  const { instance } = req.params;
+  // Provide a pairing code for simpler local testing.
+  const pairingCode = `${Math.floor(Math.random() * 900 + 100)}-${Math.floor(Math.random() * 900 + 100)}`;
+  return res.json({
+    instance: { instanceName: instance, status: 'CONNECTING' },
+    pairingCode,
+    count: Math.floor(Math.random() * 3) + 1,
+  });
+});
+
+app.get('/mock-evo/instance/fetchInstances/:instance', (req, res) => {
+  const { instance } = req.params;
+  return res.json({
+    instance: { instanceName: instance, status: 'DISCONNECTED' },
+    connectionStatus: { state: 'close' },
+  });
+});
+
+app.delete('/mock-evo/instance/delete/:instance', (req, res) => {
+  const { instance } = req.params;
+  return res.json({ status: 'SUCCESS', message: `Instance ${instance} deleted (mock)` });
 });
 
 // Healthcheck
