@@ -69,3 +69,10 @@ export interface QuickResponse {
   user_id?: string;
   created_at?: string;
 }
+
+export interface Team {
+  id: string;
+  name: string;
+  description?: string | null;
+  user_id: string;
+}

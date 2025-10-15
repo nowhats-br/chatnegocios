@@ -14,15 +14,9 @@ import MessageInput from './MessageInput';
 import { useAuth } from '@/contexts/AuthContext';
 import Popover from '../ui/Popover';
 
-type ConversationWithContact = Conversation & {
-  contacts: {
-    name: string | null;
-    avatar_url: string | null;
-  } | null;
-};
 
 interface ChatWindowProps {
-  conversation: ConversationWithContact;
+  conversation: Conversation;
   onSendMessage: (content: string) => Promise<void>;
   onSendAttachment: (file: File) => Promise<void>;
   headerActions?: React.ReactNode;
