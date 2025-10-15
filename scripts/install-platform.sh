@@ -24,6 +24,8 @@ USE_STAGING="${USE_STAGING:-0}" # 1 para usar Let's Encrypt staging
 CHAT_DB_PASS="${CHAT_DB_PASS:-ChatNegocios123!}"
 EVO_DB_PASS="${EVO_DB_PASS:-Evolution123!}"
 EVO_APIKEY="${EVO_APIKEY:-}"
+EVO_IMAGE="${EVO_IMAGE:-atendai/evolution-api}"
+EVO_IMAGE_TAG="${EVO_IMAGE_TAG:-v2.1.1}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -rp "Informe o domínio do ChatNegócios (ex: chat.seu-dominio.com): " CHAT_DOMAIN
@@ -246,12 +248,15 @@ services:
     networks: [ web ]
 
   evolution-api:
-    image: ghcr.io/evolutionapi/evolution-api:latest
+    image: ${EVO_IMAGE}:${EVO_IMAGE_TAG}
     environment:
       PORT: 8080
       APP_PORT: 8080
-      DATABASE_URL: postgres://evolution:${EVO_DB_PASS}@postgres-evolution:5432/evolution
-      MANAGER_APIKEY: ${EVO_APIKEY}
+      AUTHENTICATION_API_KEY: ${EVO_APIKEY}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: "postgresql"
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVO_DB_PASS}@postgres-evolution:5432/evolution
+      SERVER_URL: https://${EVO_DOMAIN}
     depends_on:
       postgres-evolution:
         condition: service_healthy
@@ -263,6 +268,8 @@ services:
       - "traefik.http.services.evo.loadbalancer.server.port=8080"
     restart: unless-stopped
     networks: [ web ]
+    volumes:
+      - evo_instances:/evolution/instances
 
 networks:
   web:
@@ -270,6 +277,7 @@ networks:
 
 volumes:
   evo_pgdata:
+  evo_instances:
 EOF
 (cd "$EVO_DIR" && docker compose up -d)
 
