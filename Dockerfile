@@ -13,7 +13,11 @@ COPY . .
 
 # Build frontend loading Vite envs via BuildKit secret
 RUN --mount=type=secret,id=vite_env \
-    export $(grep -v '^#' /run/secrets/vite_env | xargs) && \
+    if [ -f /run/secrets/vite_env ]; then \
+      export $(grep -v '^#' /run/secrets/vite_env | xargs); \
+    else \
+      echo "[Build] Sem segredo vite_env; prosseguindo com env padrão"; \
+    fi; \
     npx tsc && npm run build
 
 

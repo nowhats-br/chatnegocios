@@ -100,7 +100,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         content: content,
         message_type: 'text',
         created_at: new Date().toISOString(),
-        user_id: user.id
+        user_id: String(user.id)
     };
     setMessages(prev => [...prev, optimisticMessage]);
 
@@ -118,7 +118,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         content: `Enviando ${file.name}...`,
         message_type: file.type.startsWith('image/') ? 'image' : 'file',
         created_at: new Date().toISOString(),
-        user_id: user.id
+        user_id: String(user.id)
     };
     setMessages(prev => [...prev, optimisticMessage]);
 
