@@ -42,12 +42,16 @@ fi
 # Coleta de variáveis de ambiente (ou prompt)
 CHAT_DOMAIN="${CHAT_DOMAIN:-}"
 SSL_EMAIL="${SSL_EMAIL:-}"
+EVO_DOMAIN="${EVO_DOMAIN:-}"
 
 if [[ -z "$CHAT_DOMAIN" ]]; then
   read -rp "Informe o domínio do ChatNegócios (ex: chat.seu-dominio.com): " CHAT_DOMAIN
 fi
 if [[ -z "$SSL_EMAIL" ]]; then
   read -rp "Informe o e-mail para SSL (Let's Encrypt): " SSL_EMAIL
+fi
+if [[ -z "$EVO_DOMAIN" ]]; then
+  read -rp "Informe o domínio para Evolution API (ex: api.seu-dominio.com): " EVO_DOMAIN
 fi
 
 # Detectar se já estamos dentro de um clone existente
@@ -75,7 +79,7 @@ if [[ ! -d "$TARGET_DIR/scripts" ]]; then
 fi
 
 log "Executando instalador completo (scripts/install-all.sh)..."
-export CHAT_DOMAIN SSL_EMAIL
+export CHAT_DOMAIN SSL_EMAIL EVO_DOMAIN
 bash "$TARGET_DIR/scripts/install-all.sh"
 
 log "Instalação concluída."

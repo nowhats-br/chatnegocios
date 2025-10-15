@@ -158,8 +158,36 @@ fi
 docker rm -f chatnegocios || true
 DOCKER_BUILDKIT=1 docker build --secret id=vite_env,src="$ENV_FILE" -t chatnegocios:latest .
 
+echo "\n[3.5/8] Subindo Postgres para ChatNegócios..."
+docker network inspect chat_net >/dev/null 2>&1 || docker network create chat_net
+DB_NAME="chatnegocios"
+DB_USER="chatnegocios"
+DB_PASS="${CHAT_DB_PASS:-ChatNegocios123!}"
+docker rm -f postgres-chatnegocios || true
+docker run -d --name postgres-chatnegocios --restart unless-stopped \
+  --network chat_net \
+  -e POSTGRES_DB="$DB_NAME" -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$DB_PASS" \
+  -v chat_pgdata:/var/lib/postgresql/data \
+  -p 127.0.0.1:5432:5432 postgres:15-alpine
+echo "Aguardando Postgres ficar saudável..."
+PG_HEALTH_OK=0
+for i in $(seq 1 30); do
+  if docker exec postgres-chatnegocios pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+    PG_HEALTH_OK=1
+    echo "Postgres respondeu."
+    break
+  fi
+  sleep 2
+done
+if [[ "$PG_HEALTH_OK" -ne 1 ]]; then
+  echo "[ERRO] Postgres não ficou saudável a tempo." >&2
+fi
+DATABASE_URL="postgres://${DB_USER}:${DB_PASS}@postgres-chatnegocios:5432/${DB_NAME}"
+
 echo "\n[4/8] Subindo container do ChatNegócios (porta 3000)..."
-docker run -d --name chatnegocios --restart unless-stopped -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
+docker run -d --name chatnegocios --restart unless-stopped --network chat_net \
+  -e DATABASE_URL="$DATABASE_URL" -e WEBHOOK_PATH="/api/evolution/webhook" -e PORT=3000 \
+  -p 127.0.0.1:${CHAT_TARGET_PORT}:3000 chatnegocios:latest
 
 # Aguarda saúde do ChatNegócios antes de configurar Nginx
 echo "Aguardando ChatNegócios ficar saudável..."

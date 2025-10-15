@@ -6,7 +6,7 @@ import Label from '@/components/ui/Label';
 import Badge from '@/components/ui/Badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/Dialog';
 import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, MoreHorizontal, Trash2, Smartphone } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+// Supabase removido: agora usamos o backend próprio via Express + PostgreSQL
 import { Connection } from '@/types/database';
 import { toast } from 'sonner';
 import { useEvolutionApi } from '@/hooks/useEvolutionApi';
@@ -82,39 +82,24 @@ export default function Connections() {
 
   const fetchConnections = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('connections')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      toast.error('Erro ao buscar conexões', { description: error.message });
-    } else {
+    try {
+      const res = await fetch('/api/connections');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: Connection[] = await res.json();
       setConnections(data);
+    } catch (error: any) {
+      toast.error('Erro ao buscar conexões', { description: error.message });
+      setConnections([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchConnections();
   }, [fetchConnections]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('connections-changes')
-      .on<Connection>(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'connections' },
-        () => {
-          fetchConnections();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchConnections]);
+  // Realtime via Supabase removido; atualizamos manualmente após ações e via polling futuro se necessário
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
@@ -151,15 +136,21 @@ export default function Connections() {
         throw new Error("A Evolution API não respondeu à criação da instância.");
       }
 
-      // Salvar no Supabase com status inicial DISCONNECTED
-      const { error: dbError } = await supabase.from('connections').insert({ 
-        instance_name: newConnectionName, 
-        status: 'DISCONNECTED', // Status inicial sempre desconectado
-        user_id: user.id,
-        instance_data: creationResponse,
+      // Salvar no backend com status inicial DISCONNECTED
+      const saveRes = await fetch('/api/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instance_name: newConnectionName,
+          status: 'DISCONNECTED',
+          user_id: user.id,
+          instance_data: creationResponse,
+        }),
       });
-      
-      if (dbError) throw new Error(`Falha ao salvar instância no banco: ${dbError.message}`);
+      if (!saveRes.ok) {
+        const errData = await saveRes.json().catch(() => ({ message: `HTTP ${saveRes.status}` }));
+        throw new Error(`Falha ao salvar instância no banco: ${errData.message}`);
+      }
 
       toast.success(`Instância "${newConnectionName}" criada com sucesso.`);
       
@@ -182,10 +173,12 @@ export default function Connections() {
     setPairingCode('');
 
     try {
-      // Atualizar status para connecting
-      await supabase.from('connections').update({ 
-        status: 'CONNECTING' 
-      }).eq('id', connection.id);
+      // Atualizar status para CONNECTING
+      await fetch(`/api/connections/${connection.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'CONNECTING' }),
+      });
 
       // 1) Chamar endpoint de conexão da Evolution API
       const connectResponse = await evolutionApiRequest<any>(
@@ -202,11 +195,19 @@ export default function Connections() {
 
       if (qrData?.qrCode) {
         setQrCodeData(qrData.qrCode);
-        await supabase.from('connections').update({ status: 'CONNECTING' }).eq('id', connection.id);
+        await fetch(`/api/connections/${connection.id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'CONNECTING' }),
+        });
         toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else if (qrData?.pairing) {
         setPairingCode(qrData.pairing);
-        await supabase.from('connections').update({ status: 'CONNECTING' }).eq('id', connection.id);
+        await fetch(`/api/connections/${connection.id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'CONNECTING' }),
+        });
         toast.success("Código de pareamento gerado! Use-o para conectar.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else {
         const lastError = evolutionError ? ` Detalhes: ${evolutionError}` : '';
@@ -216,10 +217,12 @@ export default function Connections() {
     } catch (error: any) {
       toast.error('Falha ao gerar QR Code.', { description: error.message });
       
-      // Reverter status para disconnected em caso de erro
-      await supabase.from('connections').update({ 
-        status: 'DISCONNECTED' 
-      }).eq('id', connection.id);
+      // Reverter status para DISCONNECTED em caso de erro
+      await fetch(`/api/connections/${connection.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'DISCONNECTED' }),
+      });
       
       setIsQrModalOpen(false);
     } finally {
@@ -244,11 +247,11 @@ export default function Connections() {
         { method: 'DELETE' }
       );
 
-      // Depois, deletar do Supabase
-      const { error } = await supabase.from('connections').delete().eq('id', connectionToDelete.id);
-      
-      if (error) {
-        throw new Error(error.message);
+      // Depois, deletar do backend
+      const delRes = await fetch(`/api/connections/${connectionToDelete.id}`, { method: 'DELETE' });
+      if (!delRes.ok) {
+        const errData = await delRes.json().catch(() => ({ message: `HTTP ${delRes.status}` }));
+        throw new Error(errData.message || 'Erro ao excluir no banco');
       }
 
       toast.success('Conexão excluída com sucesso!');
