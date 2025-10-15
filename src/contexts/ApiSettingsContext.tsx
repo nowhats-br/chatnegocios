@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
 
@@ -26,24 +25,40 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = useCallback(async () => {
+    const envUrl = import.meta.env.VITE_EVOLUTION_API_URL ?? null;
+    const envKey = import.meta.env.VITE_EVOLUTION_API_KEY ?? null;
     if (!user) {
+      setApiUrl(envUrl);
+      setApiKey(envKey);
       setLoading(false);
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('evolution_api_url, evolution_api_key')
-      .eq('id', user.id)
-      .single();
-    
-    if (error && error.code !== 'PGRST116') { // Ignore "no rows found" error
-      toast.error("Erro ao buscar configurações da API", { description: error.message });
-    } else if (data) {
-      setApiUrl(data.evolution_api_url);
-      setApiKey(data.evolution_api_key);
+    try {
+      const res = await fetch(`/api/settings/${String(user.id)}`);
+      if (res.status === 404) {
+        // Sem configuração no backend: usar fallback do .env
+        setApiUrl(envUrl);
+        setApiKey(envKey);
+      } else if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        toast.error('Erro ao buscar configurações da API', {
+          description: `HTTP ${res.status} ${res.statusText}${text ? ` - ${text.substring(0, 300)}` : ''}`,
+        });
+        setApiUrl(envUrl);
+        setApiKey(envKey);
+      } else {
+        const data = await res.json();
+        setApiUrl(data?.evolution_api_url ?? envUrl);
+        setApiKey(data?.evolution_api_key ?? envKey);
+      }
+    } catch (err) {
+      toast.error('Erro ao buscar configurações da API', { description: String(err) });
+      setApiUrl(envUrl);
+      setApiKey(envKey);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [user]);
 
   useEffect(() => {
@@ -52,20 +67,30 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const updateSettings = async (newApiUrl: string, newApiKey: string) => {
     if (!user) {
-      toast.error("Você precisa estar logado para salvar as configurações.");
+      toast.error('Você precisa estar logado para salvar as configurações.');
       return;
     }
-    const { error } = await supabase
-      .from('profiles')
-      .update({ evolution_api_url: newApiUrl, evolution_api_key: newApiKey })
-      .eq('id', user.id);
-    
-    if (error) {
-      toast.error("Erro ao salvar configurações", { description: error.message });
-    } else {
-      setApiUrl(newApiUrl);
-      setApiKey(newApiKey);
-      toast.success("Configurações da API salvas com sucesso!");
+    try {
+      const res = await fetch(`/api/settings/${String(user.id)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ evolution_api_url: newApiUrl, evolution_api_key: newApiKey }),
+        }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        toast.error('Erro ao salvar configurações', {
+          description: `HTTP ${res.status} ${res.statusText}${text ? ` - ${text.substring(0, 300)}` : ''}`,
+        });
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      setApiUrl(data?.evolution_api_url ?? newApiUrl);
+      setApiKey(data?.evolution_api_key ?? newApiKey);
+      toast.success('Configurações da API salvas com sucesso!');
+    } catch (err) {
+      toast.error('Erro ao salvar configurações', { description: String(err) });
     }
   };
 

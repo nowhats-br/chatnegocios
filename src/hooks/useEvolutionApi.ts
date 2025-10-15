@@ -47,10 +47,15 @@ export function useEvolutionApi(): UseEvolutionApiReturn {
       const isGet = !options.method || options.method.toString().toUpperCase() === 'GET';
       const headers: HeadersInit = {
         'Accept': 'application/json',
-        'apikey': evolutionApiKey,
         ...(!isGet ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       };
+      // Header de autenticação: suporta apikey e Authorization Bearer
+      if (/^Bearer\s+/i.test(String(evolutionApiKey))) {
+        (headers as any)['Authorization'] = String(evolutionApiKey);
+      } else {
+        (headers as any)['apikey'] = String(evolutionApiKey);
+      }
 
       const response = await fetch(fullUrl, {
         ...options,

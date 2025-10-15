@@ -87,6 +87,15 @@ async function ensureSchema() {
       PRIMARY KEY (contact_id, tag_id)
     );
   `);
+  // Evolution API settings por usuário
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_settings (
+      user_id TEXT PRIMARY KEY,
+      evolution_api_url TEXT,
+      evolution_api_key TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 }
 
 ensureSchema().catch((err) => {
@@ -243,6 +252,50 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) {
     console.error('[Auth] Erro no login:', err);
     res.status(500).json({ message: 'Erro ao efetuar login' });
+  }
+});
+
+// API Settings (Evolution) - persistência por usuário
+app.get('/api/settings/:userId', async (req, res) => {
+  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
+  const userId = String(req.params.userId || '').trim();
+  if (!userId) return res.status(400).json({ message: 'userId é obrigatório' });
+  try {
+    const { rows } = await pool.query(
+      'SELECT evolution_api_url, evolution_api_key, updated_at FROM api_settings WHERE user_id = $1',
+      [userId]
+    );
+    if (!rows.length) return res.status(404).json({ message: 'Configuração não encontrada' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[Settings] Erro ao buscar configurações:', err);
+    res.status(500).json({ message: 'Erro ao buscar configurações' });
+  }
+});
+
+app.put('/api/settings/:userId', async (req, res) => {
+  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
+  const userId = String(req.params.userId || '').trim();
+  const { evolution_api_url, evolution_api_key } = req.body || {};
+  if (!userId) return res.status(400).json({ message: 'userId é obrigatório' });
+  if (!evolution_api_url || !evolution_api_key) {
+    return res.status(400).json({ message: 'evolution_api_url e evolution_api_key são obrigatórios' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO api_settings (user_id, evolution_api_url, evolution_api_key)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id)
+       DO UPDATE SET evolution_api_url = EXCLUDED.evolution_api_url,
+                     evolution_api_key = EXCLUDED.evolution_api_key,
+                     updated_at = NOW()
+       RETURNING user_id, evolution_api_url, evolution_api_key, updated_at`,
+      [userId, evolution_api_url, evolution_api_key]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[Settings] Erro ao salvar configurações:', err);
+    res.status(500).json({ message: 'Erro ao salvar configurações' });
   }
 });
 
