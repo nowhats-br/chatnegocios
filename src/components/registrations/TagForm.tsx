@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Tag } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -61,21 +61,16 @@ const TagForm: React.FC<TagFormProps> = ({ isOpen, onClose, tag, onSuccess }) =>
     }
     setIsSubmitting(true);
     try {
-      let result;
-      const tagData = { ...data, user_id: user.id };
-      
+      const tagPayload = { ...data, user_id: user.id };
+      let savedTag: Tag;
       if (tag) {
-        result = await supabase.from('tags').update(tagData).eq('id', tag.id).select().single();
+        savedTag = await dbClient.tags.update(tag.id, { name: tagPayload.name, color: tagPayload.color });
       } else {
-        result = await supabase.from('tags').insert(tagData).select().single();
+        savedTag = await dbClient.tags.create(tagPayload);
       }
-
-      if (result.error) throw result.error;
-      
       toast.success(`Etiqueta ${tag ? 'atualizada' : 'criada'} com sucesso!`);
-      onSuccess(result.data);
+      onSuccess(savedTag);
       onClose();
-
     } catch (error: any) {
       toast.error(`Erro ao ${tag ? 'atualizar' : 'criar'} etiqueta`, { description: error.message });
     } finally {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Contact, Tag } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -25,12 +25,11 @@ const ClientTagManager: React.FC<ClientTagManagerProps> = ({ isOpen, onClose, cl
 
     const fetchInitialData = async () => {
       setLoading(true);
-      
-      const { data: allTagsData, error: allTagsError } = await supabase.from('tags').select('*');
-      if (allTagsError) {
-        toast.error("Erro ao buscar etiquetas disponíveis.", { description: allTagsError.message });
-      } else {
+      try {
+        const allTagsData = await dbClient.tags.list();
         setAllTags(allTagsData);
+      } catch (error: any) {
+        toast.error("Erro ao buscar etiquetas disponíveis.", { description: error.message });
       }
 
       const initialTagIds = new Set(client.contact_tags.map(ct => ct.tags.id));
@@ -56,32 +55,16 @@ const ClientTagManager: React.FC<ClientTagManagerProps> = ({ isOpen, onClose, cl
 
   const handleSave = async () => {
     setIsSubmitting(true);
-    
-    const { error: deleteError } = await supabase.from('contact_tags').delete().eq('contact_id', client.id);
-    if (deleteError) {
-      toast.error("Erro ao atualizar etiquetas (fase 1).", { description: deleteError.message });
+    try {
+      await dbClient.contacts.updateTags(client.id, Array.from(clientTagIds));
+      toast.success("Etiquetas atualizadas com sucesso!");
+      onSuccess();
+      onClose();
+    } catch (error: any) {
+      toast.error("Erro ao atualizar etiquetas.", { description: error.message });
+    } finally {
       setIsSubmitting(false);
-      return;
     }
-
-    const newTagsToInsert = Array.from(clientTagIds).map(tagId => ({
-      contact_id: client.id,
-      tag_id: tagId,
-    }));
-
-    if (newTagsToInsert.length > 0) {
-      const { error: insertError } = await supabase.from('contact_tags').insert(newTagsToInsert);
-      if (insertError) {
-        toast.error("Erro ao atualizar etiquetas (fase 2).", { description: insertError.message });
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
-    toast.success("Etiquetas atualizadas com sucesso!");
-    setIsSubmitting(false);
-    onSuccess();
-    onClose();
   };
 
   return (

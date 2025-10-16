@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Tag } from '@/types/database';
 import { toast } from 'sonner';
 import { Loader2, PlusCircle, MoreHorizontal, Pencil, Trash2, AlertTriangle } from 'lucide-react';
@@ -19,13 +19,14 @@ const TagManager: React.FC = () => {
 
   const fetchTags = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('tags').select('*').order('created_at', { ascending: false });
-    if (error) {
-      toast.error('Erro ao buscar etiquetas', { description: error.message });
-    } else {
+    try {
+      const data = await dbClient.tags.list();
       setTags(data);
+    } catch (error: any) {
+      toast.error('Erro ao buscar etiquetas', { description: error.message });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -45,16 +46,17 @@ const TagManager: React.FC = () => {
   const confirmDelete = async () => {
     if (!selectedTag) return;
     setIsSubmitting(true);
-    const { error } = await supabase.from('tags').delete().eq('id', selectedTag.id);
-    if (error) {
-      toast.error('Erro ao excluir etiqueta', { description: error.message });
-    } else {
+    try {
+      await dbClient.tags.delete(selectedTag.id);
       toast.success('Etiqueta excluída com sucesso!');
       setTags(tags.filter(p => p.id !== selectedTag.id));
       setAlertOpen(false);
       setSelectedTag(null);
+    } catch (error: any) {
+      toast.error('Erro ao excluir etiqueta', { description: error.message });
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const onFormSuccess = (newTag: Tag) => {

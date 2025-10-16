@@ -131,4 +131,38 @@ export const dbClient = {
       return await http<{ ok: boolean }>(`/products/${id}`, { method: 'DELETE' });
     },
   },
+  tags: {
+    async list() {
+      return await http<any[]>(`/tags`);
+    },
+    async create(payload: { user_id: string; name: string; color?: string | null }) {
+      return await http<any>(`/tags`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+    async update(id: string, payload: { name?: string; color?: string | null }) {
+      return await http<any>(`/tags/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+    },
+    async delete(id: string) {
+      return await http<{ ok: boolean }>(`/tags/${id}`, { method: 'DELETE' });
+    },
+  },
+  contacts: {
+    async listWithTags() {
+      return await http<any[]>(`/contacts`);
+    },
+    async delete(id: number) {
+      return await http<{ ok: boolean }>(`/contacts/${id}`, { method: 'DELETE' });
+    },
+    async updateTags(id: number, tagIds: string[]) {
+      return await http<any>(`/contacts/${id}/tags`, {
+        method: 'PUT',
+        body: JSON.stringify({ tag_ids: tagIds }),
+      });
+    },
+  },
 };

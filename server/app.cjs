@@ -86,6 +86,19 @@ if (process.env.DATABASE_URL) {
       category text,
       created_at timestamp default now()
     );
+
+    create table if not exists tags (
+      id text primary key,
+      user_id text not null,
+      name text not null,
+      color text,
+      created_at timestamp default now()
+    );
+
+    create table if not exists contact_tags (
+      contact_id int references contacts(id),
+      tag_id text references tags(id)
+    );
   `;
   db.public.none(schemaSql);
 }
@@ -346,6 +359,100 @@ app.delete('/products/:id', async (req, res) => {
     const { id } = req.params;
     await asyncQuery('delete from products where id=$1', [id]);
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Tags
+app.get('/tags', async (_req, res) => {
+  try {
+    const { rows } = await asyncQuery('select * from tags order by name asc', []);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/tags', async (req, res) => {
+  try {
+    const { user_id, name, color } = req.body || {};
+    if (!user_id || !name) return res.status(400).json({ error: 'Dados inválidos' });
+    const id = String(Date.now());
+    const { rows } = await asyncQuery(
+      'insert into tags (id, user_id, name, color) values ($1,$2,$3,$4) returning *',
+      [id, user_id, name, color || null]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/tags/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, color } = req.body || {};
+    const { rows } = await asyncQuery(
+      'update tags set name=coalesce($2,name), color=coalesce($3,color) where id=$1 returning *',
+      [id, name || null, color || null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Etiqueta não encontrada' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/tags/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await asyncQuery('delete from contact_tags where tag_id=$1', [id]);
+    await asyncQuery('delete from tags where id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Contacts (with tags)
+app.get('/contacts', async (_req, res) => {
+  try {
+    const { rows } = await asyncQuery(
+      "select c.*, coalesce((select json_agg(json_build_object('contact_id', ct.contact_id, 'tag_id', ct.tag_id, 'tags', row_to_json(t))) from contact_tags ct join tags t on t.id=ct.tag_id where ct.contact_id=c.id),'[]'::json) as contact_tags from contacts c order by c.created_at desc",
+      []
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/contacts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await asyncQuery('delete from contact_tags where contact_id=$1', [id]);
+    await asyncQuery('delete from contacts where id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/contacts/:id/tags', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tag_ids } = req.body || {};
+    if (!Array.isArray(tag_ids)) return res.status(400).json({ error: 'tag_ids deve ser um array de strings' });
+    await asyncQuery('delete from contact_tags where contact_id=$1', [id]);
+    for (const tagId of tag_ids) {
+      await asyncQuery('insert into contact_tags (contact_id, tag_id) values ($1,$2)', [id, tagId]);
+    }
+    const { rows } = await asyncQuery(
+      "select c.*, coalesce((select json_agg(json_build_object('contact_id', ct.contact_id, 'tag_id', ct.tag_id, 'tags', row_to_json(t))) from contact_tags ct join tags t on t.id=ct.tag_id where ct.contact_id=c.id),'[]'::json) as contact_tags from contacts c where c.id=$1",
+      [id]
+    );
+    res.json(rows[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
