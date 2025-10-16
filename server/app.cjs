@@ -9,7 +9,24 @@ dotenv.config();
 
 const PORT = process.env.PORT || 3001;
 const app = express();
-app.use(cors({ origin: ['http://localhost:5173'], credentials: true }));
+
+// CORS dinâmico: permitir origens definidas em CORS_ORIGINS (separadas por vírgula) + localhost dev
+const defaultOrigins = ['http://localhost:5173'];
+const envOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = [...defaultOrigins, ...envOrigins];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permitir requisições sem origem (ex.: curl, serviços internos)
+    if (!origin) return callback(null, true);
+    const isAllowed = allowedOrigins.includes(origin);
+    callback(null, isAllowed);
+  },
+  credentials: true,
+}));
 app.use(bodyParser.json());
 
 // Database setup: try real Postgres, fallback to in-memory
