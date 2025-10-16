@@ -475,6 +475,23 @@ app.put('/contacts/:id/tags', async (req, res) => {
   }
 });
 
+// Evolution/WhatsApp webhook endpoint
+app.get('/api/whatsapp/webhook', async (_req, res) => {
+  res.json({ ok: true, status: 'alive' });
+});
+
+app.post('/api/whatsapp/webhook', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    console.log('[Webhook] Recebido:', JSON.stringify(payload));
+    // Aqui você pode integrar com tables/messages/contacts conforme necessário
+    // Por agora, apenas confirmamos recebimento
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
 });
