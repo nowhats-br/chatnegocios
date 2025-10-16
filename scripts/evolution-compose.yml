@@ -8,10 +8,22 @@ services:
     environment:
       # Usa a mesma chave definida no .env do projeto (VITE_EVOLUTION_API_KEY)
       - AUTHENTICATION_API_KEY=${VITE_EVOLUTION_API_KEY}
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:postgres@evolution_postgres:5432/evolution
+      # Redis (cache) — necessário para Evolution v2.2.x
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://evolution_redis:6379/6
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_REDIS_SAVE_INSTANCES=false
+      - CACHE_LOCAL_ENABLED=false
     volumes:
       - evolution_store:/evolution/store
       - evolution_instances:/evolution/instances
     restart: always
+    depends_on:
+      - evolution_postgres
+      - evolution_redis
     labels:
       - traefik.enable=true
       - traefik.http.routers.evolution.rule=Host(`${EVOLUTION_DOMAIN}`)
@@ -19,13 +31,43 @@ services:
       - traefik.http.routers.evolution.tls=true
       - traefik.http.routers.evolution.tls.certresolver=le
       - traefik.http.services.evolution.loadbalancer.server.port=8080
+      - traefik.docker.network=proxy
     networks:
       - proxy
+      - app_net
+
+  evolution_postgres:
+    image: postgres:16-alpine
+    container_name: evolution_postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=evolution
+    volumes:
+      - evolution_pgdata:/var/lib/postgresql/data
+    networks:
+      - app_net
+    restart: always
+
+  evolution_redis:
+    image: redis:7
+    container_name: evolution_redis
+    command: >
+      redis-server --port 6379 --appendonly yes
+    volumes:
+      - evolution_redis_data:/data
+    networks:
+      - app_net
+    restart: always
 
 volumes:
   evolution_store:
   evolution_instances:
+  evolution_pgdata:
+  evolution_redis_data:
 
 networks:
   proxy:
+    external: true
+  app_net:
     external: true
