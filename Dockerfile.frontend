@@ -1,0 +1,23 @@
+FROM node:18-alpine AS build
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+# Copia código do frontend e arquivos necessários para build
+COPY . .
+
+# Args para injetar variáveis no build do Vite
+ARG VITE_BACKEND_URL
+ARG VITE_EVOLUTION_API_URL
+ARG VITE_EVOLUTION_API_KEY
+
+ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
+ENV VITE_EVOLUTION_API_URL=$VITE_EVOLUTION_API_URL
+ENV VITE_EVOLUTION_API_KEY=$VITE_EVOLUTION_API_KEY
+
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80

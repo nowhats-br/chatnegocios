@@ -1,0 +1,14 @@
+FROM node:18-alpine
+WORKDIR /app
+
+# Instala dependências de produção
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copia apenas o backend
+COPY server/ ./server/
+
+ENV PORT=3001
+EXPOSE 3001
+
+CMD ["node", "server/app.cjs"]

@@ -24,12 +24,27 @@ QR Code — Endpoint
 
 Variáveis de ambiente
 ---------------------
+- `VITE_BACKEND_URL`: URL base do backend Express (ex.: `http://localhost:3001`).
+- `PORT`: Porta do backend Express (ex.: `3001`).
 - `VITE_EVOLUTION_API_URL`: URL base da Evolution API do seu provedor (ex.: `https://evo.nowhats.com.br`).
 - `VITE_EVOLUTION_API_KEY`: Chave da API fornecida pelo seu provedor.
 - `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: Template opcional para a rota do QR.
 - `VITE_EVOLUTION_WEBHOOK_URL`: URL pública do seu endpoint receptor de webhooks.
+- `DATABASE_URL`: String de conexão do Postgres (ex.: `postgresql://usuario:senha@host:5432/chatnegocios`). Se não definido, o backend usa um banco em memória para desenvolvimento.
+
+Exemplo de `.env`
+------------------
+- Utilize o arquivo `.env.example` deste repositório como base:
+  - Copie para `.env` e ajuste os valores conforme seu ambiente.
+  - Se estiver usando Traefik/Portainer, você pode acessar a Evolution em `http://evolution.localtest.me`.
+
+Supabase removido
+-----------------
+- Este projeto migrou para backend Express + REST; variáveis antigas de Supabase (ex.: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) não são mais utilizadas.
+- Remova linhas antigas de Supabase do seu `.env` para evitar confusão.
 
 Observações
 -----------
 - Reinicie o processo de desenvolvimento (`npm run dev`) após alterar o `.env`.
 - Em produção, hospede o endpoint de webhook em um backend ou função serverless (Supabase Edge Functions, Cloudflare Workers, Express em Railway/Render, etc.).
+ - Se definir `DATABASE_URL`, garanta que o Postgres esteja acessível e com o database criado; do contrário, o backend cairá em erro de conexão.

@@ -1,0 +1,31 @@
+version: '3.8'
+services:
+  evolution_api:
+    image: atendai/evolution-api:latest
+    container_name: evolution_api
+    ports:
+      - "8080:8080"
+    environment:
+      # Usa a mesma chave definida no .env do projeto (VITE_EVOLUTION_API_KEY)
+      - AUTHENTICATION_API_KEY=${VITE_EVOLUTION_API_KEY}
+    volumes:
+      - evolution_store:/evolution/store
+      - evolution_instances:/evolution/instances
+    restart: always
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.evolution.rule=Host(`${EVOLUTION_DOMAIN}`)
+      - traefik.http.routers.evolution.entrypoints=websecure
+      - traefik.http.routers.evolution.tls=true
+      - traefik.http.routers.evolution.tls.certresolver=le
+      - traefik.http.services.evolution.loadbalancer.server.port=8080
+    networks:
+      - proxy
+
+volumes:
+  evolution_store:
+  evolution_instances:
+
+networks:
+  proxy:
+    external: true

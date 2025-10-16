@@ -21,8 +21,10 @@ const ApiSettingsContext = createContext<ApiSettingsContextType>({
 
 export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const [apiUrl, setApiUrl] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const envApiUrl = import.meta.env.VITE_EVOLUTION_API_URL as string | undefined;
+  const envApiKey = import.meta.env.VITE_EVOLUTION_API_KEY as string | undefined;
+  const [apiUrl, setApiUrl] = useState<string | null>(envApiUrl || null);
+  const [apiKey, setApiKey] = useState<string | null>(envApiKey || null);
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = useCallback(async () => {
@@ -33,10 +35,13 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setLoading(true);
     try {
       const data = await dbClient.profiles.get(user.id);
-      setApiUrl(data.evolution_api_url || null);
-      setApiKey(data.evolution_api_key || null);
+      // Se não houver dados no perfil, manter valores do .env
+      setApiUrl(data.evolution_api_url || envApiUrl || null);
+      setApiKey(data.evolution_api_key || envApiKey || null);
     } catch (error: any) {
-      // 404 sem perfil: apenas ignora
+      // 404 sem perfil: usar valores do .env se disponíveis
+      setApiUrl(envApiUrl || null);
+      setApiKey(envApiKey || null);
     }
     setLoading(false);
   }, [user]);
