@@ -47,6 +47,14 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 cd "$REPO_DIR"
 
+remove_container_if_exists() {
+  local name="$1"
+  if docker ps -a --format '{{.Names}}' | grep -q "^${name}$"; then
+    echo "[WARN] Removendo container existente em conflito: ${name}"
+    docker rm -f "${name}" >/dev/null 2>&1 || true
+  fi
+}
+
 echo "[INFO] Coletando informações de instalação"
 read -rp "Dominio do ChatNegocios (frontend, ex: chatnegocios.seudominio.com): " CHATNEGOCIOS_DOMAIN
 read -rp "Dominio do ChatNegocios API (backend, ex: api.seudominio.com): " CHATNEGOCIOS_API_DOMAIN
@@ -112,15 +120,20 @@ docker build \
   -f Dockerfile.frontend .
 
 echo "[INFO] Publicando Traefik com Let's Encrypt"
+remove_container_if_exists traefik
 docker compose -f scripts/traefik-compose.yml --env-file "$ENV_FILE" up -d
 
 echo "[INFO] Publicando Postgres"
+remove_container_if_exists postgres
 docker compose -f scripts/postgres-compose.yml --env-file "$ENV_FILE" up -d
 
 echo "[INFO] Publicando Evolution API"
+remove_container_if_exists evolution_api
 docker compose -f scripts/evolution-compose.yml --env-file "$ENV_FILE" up -d
 
 echo "[INFO] Publicando ChatNegocios"
+remove_container_if_exists chatnegocios_backend
+remove_container_if_exists chatnegocios_frontend
 docker compose -f scripts/chatnegocios-compose.yml --env-file "$ENV_FILE" up -d
 
 echo
