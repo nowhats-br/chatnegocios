@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-// Supabase removido: usar backend Express
+import { supabase } from '@/lib/supabase';
 import { Contact, Tag } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -25,28 +25,18 @@ const ClientTagManager: React.FC<ClientTagManagerProps> = ({ isOpen, onClose, cl
 
     const fetchInitialData = async () => {
       setLoading(true);
-      try {
-        const resAll = await fetch('/api/tags');
-        if (!resAll.ok) throw new Error(`HTTP ${resAll.status}`);
-        const dataAll: Tag[] = await resAll.json();
-        setAllTags(dataAll);
-
-        const resClient = await fetch(`/api/clients/${client.id}/tags`);
-        if (!resClient.ok) {
-          // Se não houver associações ainda, considerar vazio
-          setClientTagIds(new Set());
-        } else {
-          const dataClient: Tag[] = await resClient.json();
-          const initialTagIds: Set<string> = new Set(dataClient.map((t) => t.id));
-          setClientTagIds(initialTagIds);
-        }
-      } catch (error: any) {
-        toast.error('Erro ao carregar dados de etiquetas', { description: error.message });
-        setAllTags([]);
-        setClientTagIds(new Set());
-      } finally {
-        setLoading(false);
+      
+      const { data: allTagsData, error: allTagsError } = await supabase.from('tags').select('*');
+      if (allTagsError) {
+        toast.error("Erro ao buscar etiquetas disponíveis.", { description: allTagsError.message });
+      } else {
+        setAllTags(allTagsData);
       }
+
+      const initialTagIds = new Set(client.contact_tags.map(ct => ct.tags.id));
+      setClientTagIds(initialTagIds);
+
+      setLoading(false);
     };
 
     fetchInitialData();
@@ -67,35 +57,26 @@ const ClientTagManager: React.FC<ClientTagManagerProps> = ({ isOpen, onClose, cl
   const handleSave = async () => {
     setIsSubmitting(true);
     
-    try {
-      // Limpa todas as associações
-      const resDel = await fetch(`/api/clients/${client.id}/tags`, { method: 'DELETE' });
-      if (!resDel.ok) {
-        const errData = await resDel.json().catch(() => ({ message: `HTTP ${resDel.status}` }));
-        throw new Error(errData.message);
-      }
-      // Inclui as novas selecionadas
-      const tag_ids = Array.from(clientTagIds);
-      if (tag_ids.length > 0) {
-        const resPost = await fetch(`/api/clients/${client.id}/tags`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_ids }),
-        });
-        if (!resPost.ok) {
-          const errData = await resPost.json().catch(() => ({ message: `HTTP ${resPost.status}` }));
-          throw new Error(errData.message);
-        }
-      }
-
-      toast.success('Etiquetas atualizadas com sucesso!');
-      onSuccess();
-      onClose();
-    } catch (error: any) {
-      toast.error('Erro ao salvar etiquetas', { description: error.message });
+    const { error: deleteError } = await supabase.from('contact_tags').delete().eq('contact_id', client.id);
+    if (deleteError) {
+      toast.error("Erro ao atualizar etiquetas (fase 1).", { description: deleteError.message });
+      setIsSubmitting(false);
+      return;
     }
-    
-    setIsSubmitting(false);
+
+    const newTagsToInsert = Array.from(clientTagIds).map(tagId => ({
+      contact_id: client.id,
+      tag_id: tagId,
+    }));
+
+    if (newTagsToInsert.length > 0) {
+      const { error: insertError } = await supabase.from('contact_tags').insert(newTagsToInsert);
+      if (insertError) {
+        toast.error("Erro ao atualizar etiquetas (fase 2).", { description: insertError.message });
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     toast.success("Etiquetas atualizadas com sucesso!");
     setIsSubmitting(false);

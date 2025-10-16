@@ -14,86 +14,80 @@ export function useApi<T>(): UseApiReturn<T> {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const { apiUrl, apiKey, isConfigured } = useApiSettings();
+  const defaultTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
 
   const request = useCallback(async (endpoint: string, options: RequestInit = {}): Promise<T | null> => {
     setLoading(true);
     setError(null);
     setData(null);
 
-    if (!isConfigured || !apiUrl || !apiKey) {
-      const errorMessage = 'Configurações da API não encontradas. Por favor, configure a URL e a Chave de API na página de Configurações.';
-      toast.error('Erro de Configuração', { description: errorMessage });
+    if (!isConfigured) {
+      const errorMessage = "Configurações da API não encontradas. Por favor, configure a URL e a Chave de API na página de Configurações.";
+      toast.error("Erro de Configuração", { description: errorMessage });
       setError(errorMessage);
       setLoading(false);
       return null;
     }
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), defaultTimeoutMs);
+
     try {
-      const fullUrl = `${apiUrl}${endpoint}`;
-
-      const controller = new AbortController();
-      const timeoutMs = 20000;
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-      const isGet = !options.method || options.method.toString().toUpperCase() === 'GET';
-      const headers: HeadersInit = {
-        Accept: 'application/json',
-        ...(!isGet ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      };
-      if (/^Bearer\s+/i.test(String(apiKey))) {
-        (headers as any)['Authorization'] = String(apiKey);
-      } else {
-        (headers as any)['apikey'] = String(apiKey);
-      }
-
-      const response = await fetch(fullUrl, {
+      const response = await fetch(`${apiUrl}${endpoint}`, {
         ...options,
-        headers,
-        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          apikey: apiKey || '',
+          ...options.headers,
+        },
+        signal: options.signal || controller.signal,
       });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type') || '';
-        let message = `O servidor respondeu com status ${response.status}`;
-        if (contentType.includes('application/json')) {
-          try {
-            const errorData: any = await response.json();
-            message = errorData?.message || message;
-          } catch { /* ignore */ }
-        } else {
-          const text = await response.text().catch(() => '');
-          if (text && /taking longer than expected to load/i.test(text)) {
-            message = 'O serviço Evolution API está iniciando/indisponível. Tente novamente em alguns minutos.';
-          } else if (text) {
-            message = `Resposta não-JSON (${response.status}): ${text.slice(0, 160)}...`;
-          }
-        }
-        throw new Error(`${message} | URL: ${fullUrl}`);
-      }
 
       const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await response.text().catch(() => '');
-        const msg = text && /taking longer than expected to load/i.test(text)
-          ? 'O serviço Evolution API está iniciando/indisponível. Tente novamente em alguns minutos.'
-          : `Resposta não-JSON inesperada | URL: ${fullUrl} | Conteúdo: ${text.slice(0, 160)}...`;
-        throw new Error(msg);
+
+      if (!response.ok) {
+        let serverMessage = `O servidor respondeu com status ${response.status}`;
+        if (contentType.includes('application/json')) {
+          const errorJson = await response.json().catch(() => null);
+          if (errorJson && (errorJson.message || errorJson.error)) {
+            serverMessage = errorJson.message || errorJson.error;
+          }
+        } else {
+          const errorText = await response.text().catch(() => '');
+          if (errorText) serverMessage = errorText;
+        }
+        throw new Error(serverMessage);
       }
 
-      const responseData: T = await response.json();
+      let responseData: T | null = null;
+      if (contentType.includes('application/json')) {
+        responseData = (await response.json()) as T;
+      } else {
+        // Fallback para respostas não-JSON (registrar texto e retornar null)
+        const text = await response.text().catch(() => '');
+        if (text) {
+          // Anexar texto bruto ao erro para diagnóstico em chamadas subsequentes
+          toast.info('Resposta não-JSON recebida da API', { description: text.slice(0, 200) });
+        }
+        responseData = null;
+      }
+
       setData(responseData);
       setLoading(false);
       return responseData;
     } catch (err: any) {
-      const msg = err?.message || 'Erro desconhecido na API';
-      setError(msg);
-      toast.error('Erro na API', { description: msg });
+      const message = err?.name === 'AbortError'
+        ? `Tempo limite excedido (${defaultTimeoutMs}ms) para ${endpoint}`
+        : err?.message || 'Erro desconhecido na requisição.';
+      setError(message);
+      toast.error('Erro na API', { description: message });
       setLoading(false);
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
-  }, [apiUrl, apiKey, isConfigured]);
+  }, [apiUrl, apiKey, isConfigured, defaultTimeoutMs]);
 
   return { data, error, loading, request };
 }

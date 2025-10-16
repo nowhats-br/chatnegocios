@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-// Migração Supabase -> Express: usar endpoints /api/quick-responses
+import { dbClient } from '@/lib/dbClient';
 import { QuickResponse } from '@/types/database';
 import { toast } from 'sonner';
 import { Loader2, PlusCircle, MoreHorizontal, Pencil, Trash2, AlertTriangle } from 'lucide-react';
@@ -20,13 +20,10 @@ const QuickResponseManager: React.FC = () => {
   const fetchResponses = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/quick-responses');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: QuickResponse[] = await res.json();
-      setResponses(data.sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
+      const data = await dbClient.quickResponses.list();
+      setResponses((data as QuickResponse[]).sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
     } catch (error: any) {
       toast.error('Erro ao buscar mensagens rápidas', { description: error.message });
-      setResponses([]);
     } finally {
       setLoading(false);
     }
@@ -50,19 +47,16 @@ const QuickResponseManager: React.FC = () => {
     if (!selectedResponse) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/quick-responses/${selectedResponse.id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-        throw new Error(errData.message);
-      }
+      await dbClient.quickResponses.delete(selectedResponse.id);
       toast.success('Mensagem rápida excluída com sucesso!');
       setResponses(responses.filter(r => r.id !== selectedResponse.id));
       setAlertOpen(false);
       setSelectedResponse(null);
     } catch (error: any) {
       toast.error('Erro ao excluir mensagem', { description: error.message });
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const onFormSuccess = (newResponse: QuickResponse) => {

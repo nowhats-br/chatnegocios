@@ -3,10 +3,9 @@ import Card, { CardHeader, CardTitle } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
-import Badge from '@/components/ui/Badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/Dialog';
+import Modal from '@/components/ui/Modal';
 import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, MoreHorizontal, Trash2, Smartphone } from 'lucide-react';
-// Supabase removido: agora usamos o backend próprio via Express + PostgreSQL
+import { dbClient } from '@/lib/dbClient';
 import { Connection } from '@/types/database';
 import { toast } from 'sonner';
 import { useEvolutionApi } from '@/hooks/useEvolutionApi';
@@ -83,13 +82,10 @@ export default function Connections() {
   const fetchConnections = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/connections');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: Connection[] = await res.json();
-      setConnections(data);
+      const data = await dbClient.connections.list();
+      setConnections(data as Connection[]);
     } catch (error: any) {
       toast.error('Erro ao buscar conexões', { description: error.message });
-      setConnections([]);
     } finally {
       setLoading(false);
     }
@@ -99,7 +95,7 @@ export default function Connections() {
     fetchConnections();
   }, [fetchConnections]);
 
-  // Realtime via Supabase removido; atualizamos manualmente após ações e via polling futuro se necessário
+  // Removido canal de realtime (Supabase); atualiza via fetchConnections após ações
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
@@ -113,16 +109,27 @@ export default function Connections() {
     setIsCreating(true);
     
     try {
-      const createPayload: EvolutionInstanceCreateRequest = {
+      const createPayloadTemplate = import.meta.env.VITE_EVOLUTION_CREATE_PAYLOAD_TEMPLATE as string | undefined;
+      let createPayload: EvolutionInstanceCreateRequest = {
         instanceName: newConnectionName,
-        qrcode: false, // Não gerar QR Code automaticamente
+        qrcode: false,
         integration: "WHATSAPP-BAILEYS",
         webhook: {
-          url: webhookUrlEnv || `${window.location.origin}/api/evolution/webhook`,
+          url: webhookUrlEnv || `${window.location.origin}/webhook`,
           enabled: Boolean(webhookUrlEnv),
-          events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"]
-        }
+          events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+        },
       };
+
+      if (createPayloadTemplate) {
+        try {
+          const replaced = createPayloadTemplate.split('{instanceName}').join(newConnectionName);
+          const parsed = JSON.parse(replaced);
+          createPayload = parsed as EvolutionInstanceCreateRequest;
+        } catch (e) {
+          // Mantém payload padrão se o template não for válido
+        }
+      }
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(
         API_ENDPOINTS.INSTANCE_CREATE, 
@@ -137,20 +144,12 @@ export default function Connections() {
       }
 
       // Salvar no backend com status inicial DISCONNECTED
-      const saveRes = await fetch('/api/connections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instance_name: newConnectionName,
-          status: 'DISCONNECTED',
-          user_id: user.id,
-          instance_data: creationResponse,
-        }),
+      await dbClient.connections.create({
+        instance_name: newConnectionName,
+        status: 'DISCONNECTED',
+        user_id: user.id,
+        instance_data: creationResponse,
       });
-      if (!saveRes.ok) {
-        const errData = await saveRes.json().catch(() => ({ message: `HTTP ${saveRes.status}` }));
-        throw new Error(`Falha ao salvar instância no banco: ${errData.message}`);
-      }
 
       toast.success(`Instância "${newConnectionName}" criada com sucesso.`);
       
@@ -173,12 +172,8 @@ export default function Connections() {
     setPairingCode('');
 
     try {
-      // Atualizar status para CONNECTING
-      await fetch(`/api/connections/${connection.id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'CONNECTING' }),
-      });
+      // Atualizar status para connecting
+      await dbClient.connections.update(connection.id, { status: 'connecting' });
 
       // 1) Chamar endpoint de conexão da Evolution API
       const connectResponse = await evolutionApiRequest<any>(
@@ -195,19 +190,11 @@ export default function Connections() {
 
       if (qrData?.qrCode) {
         setQrCodeData(qrData.qrCode);
-        await fetch(`/api/connections/${connection.id}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'CONNECTING' }),
-        });
+        await dbClient.connections.update(connection.id, { status: 'connecting' });
         toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else if (qrData?.pairing) {
         setPairingCode(qrData.pairing);
-        await fetch(`/api/connections/${connection.id}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'CONNECTING' }),
-        });
+        await dbClient.connections.update(connection.id, { status: 'connecting' });
         toast.success("Código de pareamento gerado! Use-o para conectar.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
       } else {
         const lastError = evolutionError ? ` Detalhes: ${evolutionError}` : '';
@@ -217,12 +204,8 @@ export default function Connections() {
     } catch (error: any) {
       toast.error('Falha ao gerar QR Code.', { description: error.message });
       
-      // Reverter status para DISCONNECTED em caso de erro
-      await fetch(`/api/connections/${connection.id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'DISCONNECTED' }),
-      });
+      // Reverter status para disconnected em caso de erro
+      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
       
       setIsQrModalOpen(false);
     } finally {
@@ -248,11 +231,7 @@ export default function Connections() {
       );
 
       // Depois, deletar do backend
-      const delRes = await fetch(`/api/connections/${connectionToDelete.id}`, { method: 'DELETE' });
-      if (!delRes.ok) {
-        const errData = await delRes.json().catch(() => ({ message: `HTTP ${delRes.status}` }));
-        throw new Error(errData.message || 'Erro ao excluir no banco');
-      }
+      await dbClient.connections.delete(connectionToDelete.id);
 
       toast.success('Conexão excluída com sucesso!');
       setConnections(prev => prev.filter(c => c.id !== connectionToDelete.id));
@@ -313,9 +292,9 @@ export default function Connections() {
                         <div>
                           <p className="font-semibold">{connection.instance_name}</p>
                           <div className="flex items-center space-x-2">
-                            <Badge variant="secondary" className={`${statusInfo.bgColor} ${statusInfo.color}`}>
+                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
                               {statusInfo.text}
-                            </Badge>
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -375,27 +354,22 @@ export default function Connections() {
       </Card>
 
       {/* Modal de Criação */}
-      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Criar Nova Conexão</DialogTitle>
-            <DialogDescription>
+      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Criar Nova Conexão">
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="instanceName">Nome da Instância</Label>
+            <Input 
+              id="instanceName" 
+              value={newConnectionName} 
+              onChange={(e) => setNewConnectionName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} 
+              placeholder="ex: vendas_01" 
+              className="mt-1" 
+            />
+            <p className="mt-2 text-sm text-muted-foreground">
               Crie uma nova instância do WhatsApp. Use apenas letras minúsculas, números e underscores.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="instanceName">Nome da Instância</Label>
-              <Input 
-                id="instanceName" 
-                value={newConnectionName} 
-                onChange={(e) => setNewConnectionName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} 
-                placeholder="ex: vendas_01" 
-                className="mt-1" 
-              />
-            </div>
+            </p>
           </div>
-          <DialogFooter>
+          <div className="flex items-center justify-end space-x-2">
             <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
               Cancelar
             </Button>
@@ -403,20 +377,16 @@ export default function Connections() {
               {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Criar Instância
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal do QR Code */}
-      <Dialog open={isQrModalOpen} onOpenChange={setIsQrModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Conectar WhatsApp</DialogTitle>
-            <DialogDescription>
-              {selectedConnection?.instance_name && `Instância: ${selectedConnection.instance_name}`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center justify-center space-y-4 min-h-[300px]">
+      <Modal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} title="Conectar WhatsApp">
+        <div className="text-sm text-muted-foreground mb-2">
+          {selectedConnection?.instance_name && `Instância: ${selectedConnection.instance_name}`}
+        </div>
+        <div className="flex flex-col items-center justify-center space-y-4 min-h-[300px]">
             {isConnecting && !qrCodeData && !pairingCode ? (
               <>
                 <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -454,14 +424,13 @@ export default function Connections() {
                 </p>
               </>
             )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsQrModalOpen(false)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+        <div className="flex items-center justify-end mt-4">
+          <Button variant="outline" onClick={() => setIsQrModalOpen(false)}>
+            Fechar
+          </Button>
+        </div>
+      </Modal>
 
       {/* Dialog de Confirmação de Exclusão */}
       <AlertDialog

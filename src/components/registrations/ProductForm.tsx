@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Product } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -64,7 +64,6 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
     }
     setIsSubmitting(true);
     try {
-      let result;
       const productData = { 
         ...data, 
         image_url: data.image_url || null,
@@ -72,18 +71,18 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
       };
 
       if (product) {
-        // Update
-        result = await supabase.from('products').update(productData).eq('id', product.id).select().single();
+        // Update via backend
+        const updated = await dbClient.products.update(product.id, productData);
+        toast.success('Produto atualizado com sucesso!');
+        onSuccess(updated as Product);
+        onClose();
       } else {
-        // Create
-        result = await supabase.from('products').insert(productData).select().single();
+        // Create via backend
+        const created = await dbClient.products.create(productData);
+        toast.success('Produto criado com sucesso!');
+        onSuccess(created as Product);
+        onClose();
       }
-
-      if (result.error) throw result.error;
-      
-      toast.success(`Produto ${product ? 'atualizado' : 'criado'} com sucesso!`);
-      onSuccess(result.data);
-      onClose();
 
     } catch (error: any) {
       toast.error(`Erro ao ${product ? 'atualizar' : 'criar'} produto`, { description: error.message });

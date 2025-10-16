@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Conversation, QuickResponse } from '@/types/database';
+import { dbClient } from '@/lib/dbClient';
+import { Conversation } from '@/types/database';
+type QuickResponse = {
+  id: string;
+  shortcut: string;
+  message: string;
+};
 import { Message } from '@/types/chat';
 import { toast } from 'sonner';
 import { User, MoreVertical, Loader2, FileText, Download } from 'lucide-react';
@@ -9,9 +14,15 @@ import MessageInput from './MessageInput';
 import { useAuth } from '@/contexts/AuthContext';
 import Popover from '../ui/Popover';
 
+type ConversationWithContact = Conversation & {
+  contacts: {
+    name: string | null;
+    avatar_url: string | null;
+  } | null;
+};
 
 interface ChatWindowProps {
-  conversation: Conversation;
+  conversation: ConversationWithContact;
   onSendMessage: (content: string) => Promise<void>;
   onSendAttachment: (file: File) => Promise<void>;
   headerActions?: React.ReactNode;
@@ -30,38 +41,31 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const fetchMessages = useCallback(async (conversationId: number) => {
+  const fetchMessages = useCallback(async (conversationId: string) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
+    try {
+      const data = await dbClient.messages.listByConversation(conversationId);
+      setMessages(data as Message[]);
+    } catch (error: any) {
       toast.error('Erro ao buscar mensagens', { description: error.message });
       setMessages([]);
-    } else {
-      setMessages(data);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const fetchQuickResponses = useCallback(async () => {
     try {
-      const res = await fetch('/api/quick-responses');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: QuickResponse[] = await res.json();
-      setQuickResponses(data);
-    } catch (err: any) {
-      toast.error('Erro ao buscar mensagens rápidas.', { description: err.message });
-      setQuickResponses([]);
+      const data = await dbClient.quickResponses.list();
+      setQuickResponses(data as QuickResponse[]);
+    } catch (_e) {
+      toast.error('Erro ao buscar mensagens rápidas.');
     }
   }, []);
 
   useEffect(() => {
     if (conversation.id) {
-      fetchMessages(conversation.id);
+      fetchMessages(String(conversation.id));
     }
   }, [conversation.id, fetchMessages]);
 
@@ -69,25 +73,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     scrollToBottom();
   }, [messages]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel(`messages:${conversation.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversation.id}` },
-        (payload: any) => {
-          const newMsg = payload?.new as Message;
-          if (newMsg) {
-            setMessages((prevMessages) => [...prevMessages, newMsg]);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [conversation.id]);
+  // Removido canal realtime do Supabase
 
   const handleLocalSendMessage = async (content: string) => {
     if (!user) return;
@@ -100,11 +86,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         content: content,
         message_type: 'text',
         created_at: new Date().toISOString(),
-        user_id: String(user.id)
+        user_id: user.id
     };
     setMessages(prev => [...prev, optimisticMessage]);
 
     await onSendMessage(content);
+    // Sincroniza mensagens com backend
+    fetchMessages(String(conversation.id));
   };
 
   const handleFileSelect = async (file: File) => {
@@ -118,11 +106,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         content: `Enviando ${file.name}...`,
         message_type: file.type.startsWith('image/') ? 'image' : 'file',
         created_at: new Date().toISOString(),
-        user_id: String(user.id)
+        user_id: user.id
     };
     setMessages(prev => [...prev, optimisticMessage]);
 
     await onSendAttachment(file);
+    // Sincroniza mensagens com backend
+    fetchMessages(String(conversation.id));
   }
 
   const handleQuickResponseClick = () => {

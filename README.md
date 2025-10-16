@@ -1,71 +1,35 @@
-# ChatNegócios – Guia de Configuração
+Chat Negócios — Configuração de Evolution API
 
-Este projeto integra um frontend (Vite/React) com um backend Express e a Evolution API para criar e gerenciar "connections" (instâncias) e processar mensagens via webhook. O armazenamento das connections e a autenticação são feitos exclusivamente em PostgreSQL via Express. Supabase foi removido completamente.
+Webhooks
+---------
+- O webhook da Evolution API deve apontar para um endpoint PÚBLICO seu, capaz de receber requisições HTTP (POST) e processar eventos (ex.: mensagens, atualização de conexão, QR code atualizado).
+- Não use a URL do provedor da Evolution como webhook. Essa URL é a origem dos eventos, não o destino. O destino deve ser um serviço seu.
+- Configure `VITE_EVOLUTION_WEBHOOK_URL` com a sua URL pública (ex.: `https://seu-dominio.com/api/evolution/webhook`). Em desenvolvimento, use um túnel (ngrok, Cloudflared) e aponte para esse endereço público.
+- Se `VITE_EVOLUTION_WEBHOOK_URL` não estiver definida, a criação de instância enviará o webhook como desabilitado para evitar apontar incorretamente para `localhost`.
 
-## Visão Geral
+Diferença: URL base da API vs Webhook (destino)
+-----------------------------------------------
+- `VITE_EVOLUTION_API_URL` é a URL base do seu provedor Evolution (ex.: `https://evo.nowhats.com.br`). É onde o app faz requisições para criar/gerar QR/etc.
+- `VITE_EVOLUTION_WEBHOOK_URL` é a SUA URL pública que recebe os eventos via POST.
+- Exemplo incorreto de webhook (não usar): `https://evo.nowhats.com.br/api/evolution/webhook`.
+- Exemplo correto de webhook: `https://seu-dominio.com/api/evolution/webhook` (ou URL de túnel em dev).
 
-- Backend em `server/app.cjs` expõe:
-  - `GET /api/connections`: Lista connections.
-  - `POST /api/connections`: Cria uma connection (apenas metadados; a criação de instância Evolution é feita no frontend via API Evolution).
-  - `PATCH /api/connections/:id/status`: Atualiza status da connection.
-  - `DELETE /api/connections/:id`: Remove connection.
-  - Webhook em `WEBHOOK_PATH` (recebe mensagens da Evolution API).
-- Frontend consome os endpoints acima (vide `src/pages/Connections.tsx`).
-- Banco de dados: PostgreSQL via `DATABASE_URL`.
+QR Code — Endpoint
+------------------
+- Provedores diferentes expõem o QR em rotas diferentes. Para adequar ao seu provedor, defina `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE` usando `{instanceName}` como placeholder.
+- Exemplos válidos:
+  - `/instance/qrCode/{instanceName}`
+  - `/instance/connect/{instanceName}/qrcode`
+- O app tentará primeiro o template configurado e depois fallbacks comuns. Se o QR retornar 404, ajuste o template conforme a documentação do seu provedor.
 
-## Variáveis de Build (Vite)
+Variáveis de ambiente
+---------------------
+- `VITE_EVOLUTION_API_URL`: URL base da Evolution API do seu provedor (ex.: `https://evo.nowhats.com.br`).
+- `VITE_EVOLUTION_API_KEY`: Chave da API fornecida pelo seu provedor.
+- `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: Template opcional para a rota do QR.
+- `VITE_EVOLUTION_WEBHOOK_URL`: URL pública do seu endpoint receptor de webhooks.
 
-- `VITE_EVOLUTION_API_URL`: URL base da Evolution API.
-- `VITE_EVOLUTION_API_KEY`: Chave da Evolution API.
-- `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: Template do endpoint para QR (ex.: `{{base}}/instances/{{instance}}/qr`).
-- `VITE_EVOLUTION_WEBHOOK_URL`: URL pública do webhook (usada pela Evolution para enviar mensagens).
-
-## Variáveis de Runtime
-
-- `PORT`: Porta do servidor principal (Express).
-- `WEBHOOK_PATH`: Caminho do webhook (ex.: `/api/evolution/webhook`).
-- `DATABASE_URL`: URL de conexão PostgreSQL (ex.: `postgres://user:pass@host:5432/dbname`).
-
-Em produção, recomenda-se `sslmode=require` caso o provedor exija TLS: `postgres://.../?sslmode=require`.
-
-## Docker Compose
-
-O `docker-compose.yml` inclui a variável `DATABASE_URL` no serviço da aplicação para conectar ao banco. Exemplo de bloco de variáveis:
-
-```
-environment:
-  # Build Args (Vite)
-  VITE_EVOLUTION_API_URL: "https://api.evolution.com"
-  VITE_EVOLUTION_API_KEY: "sua-chave"
-  VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE: "{{base}}/instances/{{instance}}/qr"
-  VITE_EVOLUTION_WEBHOOK_URL: "https://sua-url-publica.com/webhook"
-
-  # Runtime
-  PORT: "3000"
-  WEBHOOK_PATH: "/api/evolution/webhook"
-  DATABASE_URL: "postgres://user:pass@db:5432/app"
-```
-
-Certifique-se de que o serviço de banco (`db`) está configurado e acessível pela aplicação.
-
-## Autenticação
-
-- Endpoints locais: `POST /api/auth/signup` e `POST /api/auth/login` (ver `server/app.cjs`).
-- O frontend armazena o usuário autenticado em `localStorage` (`auth_user`) e protege rotas via `AuthContext` + `ProtectedRoute`.
-- Não há confirmação por e-mail; após signup, faça login diretamente.
-
-## Desenvolvimento
-
-- Instale dependências do servidor (inclui `pg` para PostgreSQL) e do frontend.
-- Inicie o servidor e o frontend conforme seus scripts (ex.: `npm run dev`), ou via Docker (`docker compose up -d --build`).
-- Ajuste `.env`/variáveis de ambiente conforme as seções acima.
-
-Observações:
-- Scripts podem variar conforme seu `package.json`. Caso utilize apenas Docker, os containers subirão o servidor e servirão a SPA automaticamente.
-- O webhook exige uma URL pública (`VITE_EVOLUTION_WEBHOOK_URL`) para que a Evolution API entregue eventos.
-
-## Segurança e Produção
-
-- Use `DATABASE_URL` seguro e credenciais com privilégios mínimos.
-- Se expor o webhook, proteja o endpoint e valide assinaturas quando aplicável.
-- Configure logs e monitoramento para o servidor Express.
+Observações
+-----------
+- Reinicie o processo de desenvolvimento (`npm run dev`) após alterar o `.env`.
+- Em produção, hospede o endpoint de webhook em um backend ou função serverless (Supabase Edge Functions, Cloudflare Workers, Express em Railway/Render, etc.).

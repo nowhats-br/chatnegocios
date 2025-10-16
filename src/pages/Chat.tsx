@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Conversation, Product, ConversationStatus, MessageType } from '@/types/database';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -25,24 +25,14 @@ const Chat: React.FC = () => {
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('conversations')
-      .select(`
-        *,
-        contacts (
-          name,
-          avatar_url,
-          phone_number
-        )
-      `)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      toast.error('Erro ao buscar conversas', { description: error.message });
-    } else {
+    try {
+      const data = await dbClient.conversations.listWithContact();
       setConversations(data as Conversation[]);
+    } catch (error: any) {
+      toast.error('Erro ao buscar conversas', { description: error.message });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -51,36 +41,33 @@ const Chat: React.FC = () => {
 
   const fetchProducts = useCallback(async () => {
     setLoadingProducts(true);
-    const { data, error } = await supabase.from('products').select('*').order('name');
-    if (error) {
+    try {
+      const data = await dbClient.products.list();
+      setProducts(data as Product[]);
+    } catch (error: any) {
       toast.error('Erro ao buscar produtos', { description: error.message });
-    } else {
-      setProducts(data);
+    } finally {
+      setLoadingProducts(false);
     }
-    setLoadingProducts(false);
   }, []);
 
-  const sendMessage = async (content: string, type: MessageType) => {
+  const sendMessage = async (content: string, type: MessageType, fileName?: string) => {
     if (!activeConversation || !user) {
         toast.error("Nenhuma conversa ativa selecionada.");
         return;
     }
 
     // 1. Save message to DB
-    const { error: msgError } = await supabase
-      .from('messages')
-      .insert({
+    try {
+      await dbClient.messages.create({
         conversation_id: activeConversation.id,
-        content: content,
+        content,
         sender_is_user: true,
         message_type: type,
-        user_id: user.id
-      })
-      .select()
-      .single();
-
-    if (msgError) {
-      toast.error("Erro ao salvar mensagem no banco.", { description: msgError.message });
+        user_id: user.id,
+      });
+    } catch (e: any) {
+      toast.error('Erro ao salvar mensagem no banco.', { description: e.message });
       return;
     }
 
@@ -90,15 +77,12 @@ const Chat: React.FC = () => {
         return;
     }
 
-    const { data: connectionData, error: connError } = await supabase
-        .from('connections')
-        .select('instance_name')
-        .eq('id', activeConversation.connection_id)
-        .single();
-    
-    if (connError || !connectionData) {
-        toast.error("Erro ao buscar dados da conexão.", { description: connError?.message });
-        return;
+    let connectionData: any;
+    try {
+      connectionData = await dbClient.connections.getById(activeConversation.connection_id);
+    } catch (e: any) {
+      toast.error('Erro ao buscar dados da conexão.', { description: e.message });
+      return;
     }
 
     // 3. Prepare payload and send via API
@@ -108,21 +92,21 @@ const Chat: React.FC = () => {
     let body: any;
 
     switch (type) {
-        case 'text':
-            endpoint = API_ENDPOINTS.SEND_TEXT(instanceName);
-            body = { number: to, textMessage: { text: content } };
-            break;
-        case 'image':
-            endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
-            body = { number: to, mediaMessage: { mediatype: 'image', media: content, caption: '' } };
-            break;
-        case 'file':
-            endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
-            body = { number: to, mediaMessage: { mediatype: 'document', media: content, fileName: content.split('/').pop() } };
-            break;
-        default:
-            toast.error("Tipo de mensagem não suportado.");
-            return;
+      case 'text':
+        endpoint = API_ENDPOINTS.SEND_TEXT(instanceName);
+        body = { number: to, textMessage: { text: content } };
+        break;
+      case 'image':
+        endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
+        body = { number: to, mediaMessage: { mediatype: 'image', media: content, caption: '' } };
+        break;
+      case 'file':
+        endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
+        body = { number: to, mediaMessage: { mediatype: 'document', media: content, fileName: fileName || 'arquivo' } };
+        break;
+      default:
+        toast.error('Tipo de mensagem não suportado.');
+        return;
     }
 
     await messageApi.request(endpoint, {
@@ -140,29 +124,19 @@ const Chat: React.FC = () => {
     const toastId = toast.loading('Enviando anexo...');
 
     try {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-            .from('attachments')
-            .upload(fileName, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-            .from('attachments')
-            .getPublicUrl(fileName);
-
-        if (!publicUrl) throw new Error("Não foi possível obter a URL pública do arquivo.");
-
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
         const messageType: MessageType = file.type.startsWith('image/') ? 'image' : 'file';
-        
-        await sendMessage(publicUrl, messageType);
-
+        await sendMessage(dataUrl, messageType, file.name);
         toast.success('Anexo enviado com sucesso!', { id: toastId });
-
+      };
+      reader.onerror = () => {
+        toast.error('Falha ao ler arquivo', { id: toastId });
+      };
+      reader.readAsDataURL(file);
     } catch (error: any) {
-        toast.error('Falha no envio do anexo', { id: toastId, description: error.message });
+      toast.error('Falha no envio do anexo', { id: toastId, description: error.message });
     }
   };
 
@@ -177,18 +151,13 @@ const Chat: React.FC = () => {
 
   const handleResolveConversation = async () => {
     if (!activeConversation) return;
-
-    const { error } = await supabase
-      .from('conversations')
-      .update({ status: 'resolved' })
-      .eq('id', activeConversation.id);
-    
-    if (error) {
-      toast.error('Erro ao resolver conversa', { description: error.message });
-    } else {
+    try {
+      await dbClient.conversations.update(activeConversation.id, { status: 'resolved' });
       toast.success('Conversa marcada como resolvida!');
       setConversations(prev => prev.filter(c => c.id !== activeConversation.id));
       setActiveConversation(null);
+    } catch (error: any) {
+      toast.error('Erro ao resolver conversa', { description: error.message });
     }
   };
 

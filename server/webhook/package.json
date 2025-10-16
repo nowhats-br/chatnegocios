@@ -1,9 +1,0 @@
-{
-  "name": "chatnegocios-webhook",
-  "private": true,
-  "type": "commonjs",
-  "dependencies": {
-    "express": "^4.19.2",
-    "morgan": "^1.10.0"
-  }
-}

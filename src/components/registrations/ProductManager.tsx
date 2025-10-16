@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { Product } from '@/types/database';
 import { toast } from 'sonner';
 import { Loader2, PlusCircle, MoreHorizontal, Pencil, Trash2, Image as ImageIcon, AlertTriangle } from 'lucide-react';
@@ -20,13 +20,14 @@ const ProductManager: React.FC = () => {
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (error) {
+    try {
+      const data = await dbClient.products.list();
+      setProducts((data as Product[]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)));
+    } catch (error: any) {
       toast.error('Erro ao buscar produtos', { description: error.message });
-    } else {
-      setProducts(data);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -46,16 +47,17 @@ const ProductManager: React.FC = () => {
   const confirmDelete = async () => {
     if (!selectedProduct) return;
     setIsSubmitting(true);
-    const { error } = await supabase.from('products').delete().eq('id', selectedProduct.id);
-    if (error) {
-      toast.error('Erro ao excluir produto', { description: error.message });
-    } else {
+    try {
+      await dbClient.products.delete(selectedProduct.id);
       toast.success('Produto excluído com sucesso!');
       setProducts(products.filter(p => p.id !== selectedProduct.id));
       setAlertOpen(false);
       setSelectedProduct(null);
+    } catch (error: any) {
+      toast.error('Erro ao excluir produto', { description: error.message });
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const onFormSuccess = (newProduct: Product) => {

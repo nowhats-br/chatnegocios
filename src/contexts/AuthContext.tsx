@@ -1,75 +1,43 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Loader2 } from 'lucide-react';
-
-interface LocalUser {
-  id: number;
-  email: string;
-  role?: string;
-}
+import { dbClient } from '@/lib/dbClient';
 
 interface AuthContextType {
-  user: LocalUser | null;
+  user: { id: string; email: string } | null;
+  loading: boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null });
+const AuthContext = createContext<AuthContextType>({ user: null, loading: true });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<LocalUser | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('auth_user');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.id !== 'undefined' && parsed.email) {
-          setUser(parsed);
-        } else {
-          localStorage.removeItem('auth_user');
-        }
-      }
-    } catch (_) {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Subscribe to auth changes from local stub to update user after login/logout
-  useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
-      const newUser = session?.user || null;
-      setUser(newUser);
-    });
-    return () => {
+    let mounted = true;
+    const init = async () => {
       try {
-        data?.subscription?.unsubscribe();
-      } catch (_) {
-        // ignore
+        const { user } = await dbClient.auth.me();
+        if (!mounted) return;
+        setUser(user ?? null);
+      } catch (_e) {
+        setUser(null);
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
+    init();
+    return () => { mounted = false; };
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen w-screen">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
-    <AuthContext.Provider value={{ user }}>
+    <AuthContext.Provider value={{ user, loading }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
 };

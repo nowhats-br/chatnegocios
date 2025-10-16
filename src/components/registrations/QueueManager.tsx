@@ -117,14 +117,8 @@ const QueueManager: React.FC = () => {
       
       <Modal isOpen={isFormOpen} onClose={() => setFormOpen(false)} title={selectedQueue?.id ? 'Editar Fila' : 'Nova Fila'}>
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="name">Nome da Fila</Label>
-            <Input id="name" value={selectedQueue?.name || ''} onChange={e => setSelectedQueue((p: Partial<Queue> | null) => ({ ...(p || {}), name: e.target.value }))} className="mt-1" />
-          </div>
-          <div>
-            <Label htmlFor="description">Descrição</Label>
-            <Textarea id="description" value={selectedQueue?.description || ''} onChange={e => setSelectedQueue((p: Partial<Queue> | null) => ({ ...(p || {}), description: e.target.value }))} className="mt-1" />
-          </div>
+          <div><Label htmlFor="name">Nome da Fila</Label><Input id="name" value={selectedQueue?.name || ''} onChange={e => setSelectedQueue(p => ({...p, name: e.target.value}))} className="mt-1" /></div>
+          <div><Label htmlFor="description">Descrição</Label><Textarea id="description" value={selectedQueue?.description || ''} onChange={e => setSelectedQueue(p => ({...p, description: e.target.value}))} className="mt-1" /></div>
           <div className="flex justify-end space-x-2 pt-4">
             <Button type="button" variant="ghost" onClick={() => setFormOpen(false)} disabled={isSubmitting}>Cancelar</Button>
             <Button type="submit" onClick={handleSave} disabled={isSubmitting}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{selectedQueue?.id ? 'Salvar' : 'Criar'}</Button>

@@ -11,10 +11,16 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import { toast } from 'sonner';
 import { Conversation, ConversationStatus } from '@/types/database';
+// @ts-ignore
 import { Loader2 } from 'lucide-react';
+
+
+
+
+
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 
@@ -35,7 +41,7 @@ const KanbanBoard: React.FC = () => {
     resolved: [],
   });
   const [loading, setLoading] = useState(true);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -47,19 +53,14 @@ const KanbanBoard: React.FC = () => {
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*, contacts(name, avatar_url)')
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      toast.error('Erro ao buscar conversas para o Kanban', { description: error.message });
-    } else {
-      const grouped: ConversationMap = { new: [], active: [], pending: [], resolved: [] };
-      (data as Conversation[]).forEach((convo) => {
-        const status = (convo.status ?? 'new') as ConversationStatus;
-        grouped[status].push(convo);
-      });
+    try {
+      const data = await dbClient.conversations.listWithContact();
+      const grouped = (data as Conversation[]).reduce((acc: ConversationMap, convo: Conversation) => {
+        const status = convo.status || 'new';
+        if (!acc[status]) acc[status] = [];
+        acc[status].push(convo as Conversation);
+        return acc;
+      }, {} as ConversationMap);
 
       setConversations({
         new: grouped.new || [],
@@ -67,38 +68,25 @@ const KanbanBoard: React.FC = () => {
         pending: grouped.pending || [],
         resolved: grouped.resolved || [],
       });
+    } catch (error: any) {
+      toast.error('Erro ao buscar conversas para o Kanban', { description: error.message });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('kanban-conversations-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations' },
-        () => {
-          fetchConversations();
-        }
-      )
-      .subscribe();
+  // Removido canal realtime; usar fetchConversations quando necessário
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchConversations]);
-
-  const findContainer = (id: string | number): ConversationStatus | undefined => {
+  const findContainer = (id: string): ConversationStatus | undefined => {
     if (columns.some(c => c.id === id)) {
       return id as ConversationStatus;
     }
-    const convId = typeof id === 'string' ? Number(id) : id;
     for (const status of Object.keys(conversations) as ConversationStatus[]) {
-      if (conversations[status].find((c) => c.id === convId)) {
+      if (conversations[status].find((c) => c.id === id)) {
         return status;
       }
     }
@@ -106,8 +94,7 @@ const KanbanBoard: React.FC = () => {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    const id = event.active.id;
-    setActiveId(typeof id === 'string' ? Number(id) : id);
+    setActiveId(event.active.id as string);
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -116,7 +103,7 @@ const KanbanBoard: React.FC = () => {
 
     if (!over) return;
 
-    const originalContainer = findContainer(active.id);
+    const originalContainer = findContainer(active.id as string);
     const newContainerId = over.id as string;
     const newContainer = findContainer(newContainerId);
 
@@ -124,7 +111,7 @@ const KanbanBoard: React.FC = () => {
       return;
     }
 
-    const conversationId = typeof active.id === 'string' ? Number(active.id) : (active.id as number);
+    const conversationId = active.id as string;
     const newStatus = newContainer as ConversationStatus;
 
     // Optimistic update
@@ -143,17 +130,13 @@ const KanbanBoard: React.FC = () => {
     });
 
     // Update database
-    const { error } = await supabase
-      .from('conversations')
-      .update({ status: newStatus })
-      .eq('id', conversationId);
-
-    if (error) {
+    try {
+      await dbClient.conversations.update(conversationId, { status: newStatus });
+      toast.success('Status da conversa atualizado!');
+    } catch (error: any) {
       toast.error('Erro ao atualizar status da conversa', { description: error.message });
       // Revert optimistic update
       fetchConversations();
-    } else {
-      toast.success('Status da conversa atualizado!');
     }
   };
   

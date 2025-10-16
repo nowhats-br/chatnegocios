@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// Migração Supabase -> Express: usar endpoints /api/quick-responses
+import { dbClient } from '@/lib/dbClient';
 import { QuickResponse } from '@/types/database';
 import { toast } from 'sonner';
 import Modal from '../ui/Modal';
@@ -50,34 +50,18 @@ const QuickResponseForm: React.FC<QuickResponseFormProps> = ({ isOpen, onClose, 
     setIsSubmitting(true);
     try {
       const responseData = { ...data, user_id: user.id };
-      let saved: QuickResponse | null = null;
-      if (quickResponse) {
-        const res = await fetch(`/api/quick-responses/${quickResponse.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-          throw new Error(errData.message);
-        }
-        saved = await res.json();
-      } else {
-        const res = await fetch('/api/quick-responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(responseData),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-          throw new Error(errData.message);
-        }
-        saved = await res.json();
-      }
 
-      toast.success(`Mensagem rápida ${quickResponse ? 'atualizada' : 'criada'} com sucesso!`);
-      onSuccess(saved as QuickResponse);
-      onClose();
+      if (quickResponse) {
+        const updated = await dbClient.quickResponses.update(quickResponse.id, responseData);
+        toast.success('Mensagem rápida atualizada com sucesso!');
+        onSuccess(updated as QuickResponse);
+        onClose();
+      } else {
+        const created = await dbClient.quickResponses.create(responseData);
+        toast.success('Mensagem rápida criada com sucesso!');
+        onSuccess(created as QuickResponse);
+        onClose();
+      }
 
     } catch (error: any) {
       toast.error(`Erro ao ${quickResponse ? 'atualizar' : 'criar'} mensagem`, { description: error.message });

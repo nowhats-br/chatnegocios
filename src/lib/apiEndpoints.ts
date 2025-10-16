@@ -1,36 +1,45 @@
 /**
  * Centralized API endpoints for the Evolution API.
  */
-const createWithEnv = (envKey: string, defaultPath: string) => {
-  const custom = (import.meta as any).env?.[envKey];
-  return String(custom || defaultPath);
-};
-
-const withInstance = (envKey: string, defaultTemplate: string, instanceName: string) => {
-  const custom = (import.meta as any).env?.[envKey];
-  const template = String(custom || defaultTemplate);
-  return template.replace('{instanceName}', instanceName);
-};
-
 export const API_ENDPOINTS = {
-  // Endpoint to create a new instance (allow override via env)
-  INSTANCE_CREATE: createWithEnv('VITE_EVOLUTION_INSTANCE_CREATE_ENDPOINT', '/instance/create'),
+  /**
+   * Endpoint to create a new instance.
+   */
+  INSTANCE_CREATE: '/instance/create',
 
-  // Endpoint to connect an instance
-  INSTANCE_CONNECT: (instanceName: string) => withInstance('VITE_EVOLUTION_INSTANCE_CONNECT_ENDPOINT', '/instance/connect/{instanceName}', instanceName),
+  /**
+   * Endpoint to get the connection status for a specific instance.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_CONNECT: (instanceName: string) => `/instance/connect/${instanceName}`,
   
-  // Endpoint to fetch QR code
-  INSTANCE_QR_CODE: (instanceName: string) => withInstance('VITE_EVOLUTION_INSTANCE_QR_ENDPOINT', '/instance/qrCode/{instanceName}', instanceName),
+  /**
+   * Endpoint to get the QR code for a specific instance.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_QR_CODE: (instanceName: string) => `/instance/qrCode/${instanceName}`,
 
-  // Endpoint to get status
-  INSTANCE_STATUS: (instanceName: string) => withInstance('VITE_EVOLUTION_INSTANCE_STATUS_ENDPOINT', '/instance/fetchInstances/{instanceName}', instanceName),
+  /**
+   * Endpoint to get instance status and information.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_STATUS: (instanceName: string) => `/instance/fetchInstances/${instanceName}`,
 
-  // Endpoint to delete instance
-  INSTANCE_DELETE: (instanceName: string) => withInstance('VITE_EVOLUTION_INSTANCE_DELETE_ENDPOINT', '/instance/delete/{instanceName}', instanceName),
+  /**
+   * Endpoint to delete a specific instance.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_DELETE: (instanceName: string) => `/instance/delete/${instanceName}`,
 
-  // Send text
-  SEND_TEXT: (instanceName: string) => withInstance('VITE_EVOLUTION_SEND_TEXT_ENDPOINT', '/message/sendText/{instanceName}', instanceName),
+  /**
+   * Endpoint for sending a text message.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  SEND_TEXT: (instanceName: string) => `/message/sendText/${instanceName}`,
   
-  // Send media
-  SEND_MEDIA: (instanceName: string) => withInstance('VITE_EVOLUTION_SEND_MEDIA_ENDPOINT', '/message/sendMedia/{instanceName}', instanceName),
+  /**
+   * Endpoint for sending a media file.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  SEND_MEDIA: (instanceName: string) => `/message/sendMedia/${instanceName}`,
 };

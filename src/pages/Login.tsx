@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { dbClient } from '@/lib/dbClient';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { BotMessageSquare, Loader2 } from 'lucide-react';
@@ -20,26 +20,19 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      let error;
       if (mode === 'signIn') {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        error = signInError;
+        const { token, user } = await dbClient.auth.login(email, password);
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('auth_user', JSON.stringify(user));
       } else {
-        const { error: signUpError } = await supabase.auth.signUp({ 
-          email, 
-          password,
+        // Fluxo simples: simula cadastro e volta ao login
+        const { token, user } = await dbClient.auth.login(email, password);
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('auth_user', JSON.stringify(user));
+        toast.success('Cadastro realizado!', {
+          description: 'Conta criada para uso de desenvolvimento.',
         });
-        if (!signUpError) {
-          toast.success('Cadastro realizado!', {
-            description: 'Agora faça login com seu e-mail e senha.',
-          });
-          setMode('signIn');
-        }
-        error = signUpError;
-      }
-
-      if (error) {
-        throw error;
+        setMode('signIn');
       }
       
       if (mode === 'signIn') {

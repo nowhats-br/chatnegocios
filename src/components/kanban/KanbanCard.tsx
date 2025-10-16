@@ -49,7 +49,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({ conversation, isOverlay }) => {
 
       <div className="flex justify-between items-center">
         <p className="text-xs text-muted-foreground">
-          {conversation.updated_at ? new Date(conversation.updated_at).toLocaleDateString('pt-BR') : ''}
+          {new Date(conversation.updated_at).toLocaleDateString('pt-BR')}
         </p>
         <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center">
           {conversation.contacts?.avatar_url ? (

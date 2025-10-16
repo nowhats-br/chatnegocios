@@ -1,595 +1,356 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
+const bodyParser = require('body-parser');
+const dotenv = require('dotenv');
 const { Pool } = require('pg');
+const { newDb } = require('pg-mem');
 
-// Single app server: serves SPA from dist and exposes webhook endpoint
+dotenv.config();
+
+const PORT = process.env.PORT || 3001;
 const app = express();
+app.use(cors({ origin: ['http://localhost:5173'], credentials: true }));
+app.use(bodyParser.json());
 
-const PORT = process.env.PORT || process.env.WEBHOOK_PORT || 3000;
-const WEBHOOK_PATH = process.env.WEBHOOK_PATH || '/api/evolution/webhook';
-const DIST_DIR = path.resolve(__dirname, '../dist');
-const INDEX_HTML = path.join(DIST_DIR, 'index.html');
-const DATABASE_URL = process.env.DATABASE_URL;
-
-app.use(express.json({ limit: '2mb' }));
-app.use(morgan('combined'));
-app.use(cors());
-
-// Database setup
-let pool = null;
-if (DATABASE_URL) {
-  pool = new Pool({ connectionString: DATABASE_URL });
+// Database setup: try real Postgres, fallback to in-memory
+let pool;
+if (process.env.DATABASE_URL) {
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
 } else {
-  // Fallback de desenvolvimento: usar banco em memória com pg-mem
-  try {
-    const { newDb } = require('pg-mem');
-    const mem = newDb();
-    const { Pool: MemPool } = mem.adapters.createPg();
-    pool = new MemPool();
-    console.warn('[DB] DATABASE_URL não definido; usando banco em memória (pg-mem) para desenvolvimento.');
-  } catch (err) {
-    console.warn('[DB] DATABASE_URL não definido e pg-mem não disponível; endpoints de banco ficarão indisponíveis.');
-  }
+  const db = newDb();
+  const { Pool: MemPool } = db.adapters.createPg();
+  pool = new MemPool();
+  // Minimal schema for app usage
+  const schemaSql = `
+    create table if not exists profiles (
+      id text primary key,
+      evolution_api_url text,
+      evolution_api_key text
+    );
+
+    create table if not exists connections (
+      id serial primary key,
+      user_id text not null,
+      instance_name text not null,
+      status text not null,
+      created_at timestamp default now(),
+      instance_data jsonb
+    );
+
+    create table if not exists contacts (
+      id serial primary key,
+      user_id text not null,
+      phone_number text not null,
+      name text,
+      avatar_url text,
+      purchase_history jsonb,
+      created_at timestamp default now()
+    );
+
+    create table if not exists conversations (
+      id text primary key,
+      user_id text not null,
+      contact_id int references contacts(id),
+      connection_id int references connections(id),
+      status text,
+      created_at timestamp default now(),
+      updated_at timestamp default now()
+    );
+
+    create table if not exists messages (
+      id text primary key,
+      conversation_id text references conversations(id),
+      sender_is_user boolean not null,
+      content text,
+      message_type text not null,
+      created_at timestamp default now(),
+      user_id text not null
+    );
+
+    create table if not exists quick_responses (
+      id text primary key,
+      user_id text not null,
+      shortcut text not null,
+      message text not null,
+      created_at timestamp default now()
+    );
+
+    create table if not exists products (
+      id text primary key,
+      user_id text not null,
+      name text not null,
+      description text,
+      price numeric not null,
+      stock int default 0,
+      image_url text,
+      category text,
+      created_at timestamp default now()
+    );
+  `;
+  db.public.none(schemaSql);
 }
 
-async function ensureSchema() {
-  if (!pool) return;
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS connections (
-      id SERIAL PRIMARY KEY,
-      instance_name TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL,
-      user_id TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      instance_data JSONB
-    );
-  `);
-  // Users auth (local)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'user',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  // Fase 1: Quick Responses e Tags
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS quick_responses (
-      id SERIAL PRIMARY KEY,
-      shortcut TEXT NOT NULL UNIQUE,
-      message TEXT NOT NULL,
-      user_id TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS tags (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      color TEXT,
-      user_id TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS contact_tags (
-      contact_id INTEGER NOT NULL,
-      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      user_id TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      PRIMARY KEY (contact_id, tag_id)
-    );
-  `);
-  // Evolution API settings por usuário
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS api_settings (
-      user_id TEXT PRIMARY KEY,
-      evolution_api_url TEXT,
-      evolution_api_key TEXT,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-}
-
-ensureSchema().catch((err) => {
-  console.error('[DB] Falha ao garantir schema:', err);
-});
-
-// Password hashing helpers (PBKDF2)
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const iterations = 120000; // OWASP recommended range
-  const keylen = 64;
-  const digest = 'sha512';
-  const derived = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest).toString('hex');
-  return `${salt}:${iterations}:${digest}:${derived}`;
-}
-
-function verifyPassword(password, stored) {
+// Utils
+const asyncQuery = async (text, params) => {
+  const client = await pool.connect();
   try {
-    const [salt, iterStr, digest, derived] = stored.split(':');
-    const iterations = parseInt(iterStr, 10);
-    const keylen = Buffer.from(derived, 'hex').length;
-    const check = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest).toString('hex');
-    return crypto.timingSafeEqual(Buffer.from(check, 'hex'), Buffer.from(derived, 'hex'));
-  } catch (_) {
-    return false;
+    const res = await client.query(text, params);
+    return res;
+  } finally {
+    client.release();
   }
-}
+};
 
-// Seed admin from environment
-async function ensureAdminSeed() {
-  if (!pool) return;
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  const adminRole = process.env.ADMIN_ROLE || 'admin';
-  if (!adminEmail || !adminPassword) return;
+// Auth (simple demo)
+app.post('/auth/login', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
+  const user = { id: 'dev-user', email };
+  res.json({ token: 'dev-token', user });
+});
+
+app.get('/auth/me', async (_req, res) => {
+  // In a real app, validate Authorization header / cookie
+  res.json({ user: { id: 'dev-user', email: 'dev@example.com' } });
+});
+
+app.post('/auth/logout', async (_req, res) => {
+  res.json({ ok: true });
+});
+
+// Profiles
+app.get('/profiles/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT id FROM users WHERE email = $1', [adminEmail]);
-    if (rows.length === 0) {
-      const password_hash = hashPassword(adminPassword);
-      const ins = await pool.query(
-        'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
-        [adminEmail, password_hash, adminRole]
-      );
-      console.log(`[Auth] Usuário admin criado: ${ins.rows[0].email}`);
-    } else {
-      console.log('[Auth] Usuário admin já existe, não será recriado.');
-    }
-  } catch (err) {
-    console.error('[Auth] Falha ao criar admin:', err);
-  }
-}
-
-ensureAdminSeed();
-
-// Webhook endpoint
-app.post(WEBHOOK_PATH, (req, res) => {
-  console.log(`[Webhook] Evento recebido em ${WEBHOOK_PATH}:`, {
-    headers: req.headers,
-    body: req.body,
-  });
-  res.status(200).json({ status: 'ok' });
-});
-
-// -----------------------------
-// Mock Evolution API (dev only)
-// -----------------------------
-// These endpoints simulate Evolution API responses for local testing.
-// Point VITE_EVOLUTION_API_URL to "http://localhost:3000/mock-evo" in development.
-
-app.post('/mock-evo/instance/create', (req, res) => {
-  const body = req.body || {};
-  const instanceName = body.instanceName || 'instance_dev';
-  return res.status(201).json({
-    instance: {
-      instanceName,
-      status: 'DISCONNECTED',
-    },
-    hash: { apikey: 'mocked-api-key-123' },
-    webhook: {
-      url: body.webhook?.url || '',
-      enabled: !!body.webhook?.enabled,
-    },
-  });
-});
-
-app.get('/mock-evo/instance/connect/:instance', (req, res) => {
-  const { instance } = req.params;
-  return res.json({
-    instance: { instanceName: instance, status: 'CONNECTING' },
-    message: 'Mock connect initialized',
-  });
-});
-
-app.get('/mock-evo/instance/qrCode/:instance', (req, res) => {
-  const { instance } = req.params;
-  // Provide a pairing code for simpler local testing.
-  const pairingCode = `${Math.floor(Math.random() * 900 + 100)}-${Math.floor(Math.random() * 900 + 100)}`;
-  return res.json({
-    instance: { instanceName: instance, status: 'CONNECTING' },
-    pairingCode,
-    count: Math.floor(Math.random() * 3) + 1,
-  });
-});
-
-app.get('/mock-evo/instance/fetchInstances/:instance', (req, res) => {
-  const { instance } = req.params;
-  return res.json({
-    instance: { instanceName: instance, status: 'DISCONNECTED' },
-    connectionStatus: { state: 'close' },
-  });
-});
-
-app.delete('/mock-evo/instance/delete/:instance', (req, res) => {
-  const { instance } = req.params;
-  return res.json({ status: 'SUCCESS', message: `Instance ${instance} deleted (mock)` });
-});
-
-// Healthcheck
-app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
-
-// Auth API (local)
-app.post('/api/auth/signup', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ message: 'email e password são obrigatórios' });
-  if (String(password).length < 6) return res.status(400).json({ message: 'senha deve ter ao menos 6 caracteres' });
-  try {
-    const exists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (exists.rows.length) return res.status(409).json({ message: 'E-mail já cadastrado' });
-    const password_hash = hashPassword(password);
-    const { rows } = await pool.query(
-      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
-      [email, password_hash, 'user']
-    );
-    res.status(201).json({ user: rows[0] });
-  } catch (err) {
-    console.error('[Auth] Erro no signup:', err);
-    res.status(500).json({ message: 'Erro ao cadastrar usuário' });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ message: 'email e password são obrigatórios' });
-  try {
-    const { rows } = await pool.query('SELECT id, email, password_hash, role, created_at FROM users WHERE email = $1', [email]);
-    if (!rows.length) return res.status(401).json({ message: 'Credenciais inválidas' });
-    const userRow = rows[0];
-    const ok = verifyPassword(String(password), String(userRow.password_hash));
-    if (!ok) return res.status(401).json({ message: 'Credenciais inválidas' });
-    const { id, email: userEmail, role, created_at } = userRow;
-    res.json({ user: { id, email: userEmail, role, created_at } });
-  } catch (err) {
-    console.error('[Auth] Erro no login:', err);
-    res.status(500).json({ message: 'Erro ao efetuar login' });
-  }
-});
-
-// API Settings (Evolution) - persistência por usuário
-app.get('/api/settings/:userId', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const userId = String(req.params.userId || '').trim();
-  if (!userId) return res.status(400).json({ message: 'userId é obrigatório' });
-  try {
-    const { rows } = await pool.query(
-      'SELECT evolution_api_url, evolution_api_key, updated_at FROM api_settings WHERE user_id = $1',
-      [userId]
-    );
-    if (!rows.length) return res.status(404).json({ message: 'Configuração não encontrada' });
+    const { id } = req.params;
+    const { rows } = await asyncQuery('select evolution_api_url, evolution_api_key from profiles where id=$1', [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Perfil não encontrado' });
     res.json(rows[0]);
-  } catch (err) {
-    console.error('[Settings] Erro ao buscar configurações:', err);
-    res.status(500).json({ message: 'Erro ao buscar configurações' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.put('/api/settings/:userId', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const userId = String(req.params.userId || '').trim();
-  const { evolution_api_url, evolution_api_key } = req.body || {};
-  if (!userId) return res.status(400).json({ message: 'userId é obrigatório' });
-  if (!evolution_api_url || !evolution_api_key) {
-    return res.status(400).json({ message: 'evolution_api_url e evolution_api_key são obrigatórios' });
-  }
+app.put('/profiles/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO api_settings (user_id, evolution_api_url, evolution_api_key)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id)
-       DO UPDATE SET evolution_api_url = EXCLUDED.evolution_api_url,
-                     evolution_api_key = EXCLUDED.evolution_api_key,
-                     updated_at = NOW()
-       RETURNING user_id, evolution_api_url, evolution_api_key, updated_at`,
-      [userId, evolution_api_url, evolution_api_key]
+    const { id } = req.params;
+    const { evolution_api_url, evolution_api_key } = req.body || {};
+    await asyncQuery(
+      'insert into profiles (id, evolution_api_url, evolution_api_key) values ($1,$2,$3) on conflict (id) do update set evolution_api_url=excluded.evolution_api_url, evolution_api_key=excluded.evolution_api_key',
+      [id, evolution_api_url, evolution_api_key]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Connections CRUD
+app.get('/connections', async (_req, res) => {
+  try {
+    const { rows } = await asyncQuery('select * from connections order by created_at desc', []);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/connections/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await asyncQuery('select * from connections where id=$1', [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Conexão não encontrada' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/connections', async (req, res) => {
+  try {
+    const { user_id, instance_name, status, instance_data } = req.body || {};
+    const { rows } = await asyncQuery(
+      'insert into connections (user_id, instance_name, status, instance_data) values ($1,$2,$3,$4) returning *',
+      [user_id, instance_name, status || 'DISCONNECTED', instance_data || null]
     );
     res.json(rows[0]);
-  } catch (err) {
-    console.error('[Settings] Erro ao salvar configurações:', err);
-    res.status(500).json({ message: 'Erro ao salvar configurações' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Connections API (PostgreSQL-backed)
-app.get('/api/connections', async (_req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
+app.patch('/connections/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT id, instance_name, status, user_id, created_at, instance_data FROM connections ORDER BY created_at DESC'
+    const { id } = req.params;
+    const { status, instance_data } = req.body || {};
+    const { rows } = await asyncQuery(
+      'update connections set status=coalesce($1,status), instance_data=coalesce($2,instance_data) where id=$3 returning *',
+      [status || null, instance_data || null, id]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/connections/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await asyncQuery('delete from connections where id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Conversations (list with contact)
+app.get('/conversations', async (_req, res) => {
+  try {
+    const { rows } = await asyncQuery(
+      'select c.*, json_build_object(\'name\', ct.name, \'avatar_url\', ct.avatar_url, \'phone_number\', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id order by c.updated_at desc',
+      []
     );
     res.json(rows);
-  } catch (err) {
-    console.error('[DB] Erro ao listar conexões:', err);
-    res.status(500).json({ message: 'Erro ao listar conexões' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/connections', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const { instance_name, status, user_id, instance_data } = req.body || {};
-  if (!instance_name || !status) {
-    return res.status(400).json({ message: 'instance_name e status são obrigatórios' });
-  }
+app.patch('/conversations/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO connections (instance_name, status, user_id, instance_data) VALUES ($1, $2, $3, $4) RETURNING id, instance_name, status, user_id, created_at, instance_data',
-      [instance_name, status, user_id || null, instance_data || null]
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao inserir conexão:', err);
-    const msg = err?.message?.includes('unique') ? 'Nome da instância já existe' : 'Erro ao inserir conexão';
-    res.status(500).json({ message: msg });
-  }
-});
-
-app.patch('/api/connections/:id/status', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  const { status } = req.body || {};
-  if (!Number.isFinite(id) || !status) {
-    return res.status(400).json({ message: 'ID válido e status são obrigatórios' });
-  }
-  try {
-    const { rows } = await pool.query(
-      'UPDATE connections SET status=$1 WHERE id=$2 RETURNING id, instance_name, status, user_id, created_at, instance_data',
-      [status, id]
-    );
-    if (!rows.length) return res.status(404).json({ message: 'Conexão não encontrada' });
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const { rows } = await asyncQuery('update conversations set status=$1, updated_at=now() where id=$2 returning *', [status, id]);
     res.json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao atualizar status:', err);
-    res.status(500).json({ message: 'Erro ao atualizar status' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.delete('/api/connections/:id', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) {
-    return res.status(400).json({ message: 'ID inválido' });
-  }
+// Messages
+app.get('/messages', async (req, res) => {
   try {
-    const { rowCount } = await pool.query('DELETE FROM connections WHERE id=$1', [id]);
-    if (!rowCount) return res.status(404).json({ message: 'Conexão não encontrada' });
-    res.json({ status: 'deleted' });
-  } catch (err) {
-    console.error('[DB] Erro ao deletar conexão:', err);
-    res.status(500).json({ message: 'Erro ao deletar conexão' });
-  }
-});
-
-// Quick Responses API
-app.get('/api/quick-responses', async (_req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  try {
-    const { rows } = await pool.query(
-      'SELECT id, shortcut, message, user_id, created_at FROM quick_responses ORDER BY shortcut ASC'
-    );
+    const { conversationId } = req.query;
+    if (!conversationId) return res.status(400).json({ error: 'conversationId é obrigatório' });
+    const { rows } = await asyncQuery('select * from messages where conversation_id=$1 order by created_at asc', [conversationId]);
     res.json(rows);
-  } catch (err) {
-    console.error('[DB] Erro ao listar quick_responses:', err);
-    res.status(500).json({ message: 'Erro ao listar quick_responses' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/quick-responses', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const { shortcut, message, user_id } = req.body || {};
-  if (!shortcut || !message) {
-    return res.status(400).json({ message: 'shortcut e message são obrigatórios' });
-  }
+app.post('/messages', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO quick_responses (shortcut, message, user_id) VALUES ($1, $2, $3) RETURNING id, shortcut, message, user_id, created_at',
-      [shortcut, message, user_id || null]
+    const { conversation_id, content, sender_is_user, message_type, user_id } = req.body || {};
+    const { rows } = await asyncQuery(
+      'insert into messages (id, conversation_id, content, sender_is_user, message_type, user_id) values ($1,$2,$3,$4,$5,$6) returning *',
+      [String(Date.now()), conversation_id, content || null, !!sender_is_user, message_type, user_id]
     );
     res.json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao criar quick_response:', err);
-    const msg = err?.message?.includes('unique') ? 'Atalho já existe' : 'Erro ao criar quick_response';
-    res.status(500).json({ message: msg });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.patch('/api/quick-responses/:id', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  const { shortcut, message, user_id } = req.body || {};
-  if (!Number.isFinite(id) || (!shortcut && !message && typeof user_id === 'undefined')) {
-    return res.status(400).json({ message: 'Dados inválidos para atualização' });
-  }
+// Quick Responses
+app.get('/quick_responses', async (_req, res) => {
   try {
-    const fields = [];
-    const values = [];
-    let idx = 1;
-    if (typeof shortcut !== 'undefined') { fields.push(`shortcut = $${idx++}`); values.push(shortcut); }
-    if (typeof message !== 'undefined') { fields.push(`message = $${idx++}`); values.push(message); }
-    if (typeof user_id !== 'undefined') { fields.push(`user_id = $${idx++}`); values.push(user_id); }
-    values.push(id);
-    const sql = `UPDATE quick_responses SET ${fields.join(', ')} WHERE id = $${idx} RETURNING id, shortcut, message, user_id, created_at`;
-    const { rows } = await pool.query(sql, values);
-    if (!rows.length) return res.status(404).json({ message: 'Quick response não encontrada' });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao atualizar quick_response:', err);
-    res.status(500).json({ message: 'Erro ao atualizar quick_response' });
-  }
-});
-
-app.delete('/api/quick-responses/:id', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ message: 'ID inválido' });
-  try {
-    const { rowCount } = await pool.query('DELETE FROM quick_responses WHERE id = $1', [id]);
-    if (!rowCount) return res.status(404).json({ message: 'Quick response não encontrada' });
-    res.json({ status: 'deleted' });
-  } catch (err) {
-    console.error('[DB] Erro ao deletar quick_response:', err);
-    res.status(500).json({ message: 'Erro ao deletar quick_response' });
-  }
-});
-
-// Tags API
-app.get('/api/tags', async (_req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  try {
-    const { rows } = await pool.query(
-      'SELECT id::text as id, name, color, user_id, created_at FROM tags ORDER BY created_at DESC'
-    );
+    const { rows } = await asyncQuery('select * from quick_responses order by created_at desc', []);
     res.json(rows);
-  } catch (err) {
-    console.error('[DB] Erro ao listar tags:', err);
-    res.status(500).json({ message: 'Erro ao listar tags' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/tags', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const { name, color, user_id } = req.body || {};
-  if (!name) return res.status(400).json({ message: 'name é obrigatório' });
+app.post('/quick_responses', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO tags (name, color, user_id) VALUES ($1, $2, $3) RETURNING id::text as id, name, color, user_id, created_at',
-      [name, color || null, user_id || null]
+    const { shortcut, message, user_id } = req.body || {};
+    if (!shortcut || !message || !user_id) return res.status(400).json({ error: 'Dados inválidos' });
+    const id = String(Date.now());
+    const { rows } = await asyncQuery(
+      'insert into quick_responses (id, user_id, shortcut, message) values ($1,$2,$3,$4) returning *',
+      [id, user_id, shortcut, message]
     );
     res.json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao criar tag:', err);
-    const msg = err?.message?.includes('unique') ? 'Nome de etiqueta já existe' : 'Erro ao criar tag';
-    res.status(500).json({ message: msg });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.patch('/api/tags/:id', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  const { name, color, user_id } = req.body || {};
-  if (!Number.isFinite(id) || (!name && typeof color === 'undefined' && typeof user_id === 'undefined')) {
-    return res.status(400).json({ message: 'Dados inválidos para atualização' });
-  }
+app.patch('/quick_responses/:id', async (req, res) => {
   try {
-    const fields = [];
-    const values = [];
-    let idx = 1;
-    if (typeof name !== 'undefined') { fields.push(`name = $${idx++}`); values.push(name); }
-    if (typeof color !== 'undefined') { fields.push(`color = $${idx++}`); values.push(color); }
-    if (typeof user_id !== 'undefined') { fields.push(`user_id = $${idx++}`); values.push(user_id); }
-    values.push(id);
-    const sql = `UPDATE tags SET ${fields.join(', ')} WHERE id = $${idx} RETURNING id::text as id, name, color, user_id, created_at`;
-    const { rows } = await pool.query(sql, values);
-    if (!rows.length) return res.status(404).json({ message: 'Etiqueta não encontrada' });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('[DB] Erro ao atualizar tag:', err);
-    res.status(500).json({ message: 'Erro ao atualizar tag' });
-  }
-});
-
-app.delete('/api/tags/:id', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ message: 'ID inválido' });
-  try {
-    const { rowCount } = await pool.query('DELETE FROM tags WHERE id = $1', [id]);
-    if (!rowCount) return res.status(404).json({ message: 'Etiqueta não encontrada' });
-    res.json({ status: 'deleted' });
-  } catch (err) {
-    console.error('[DB] Erro ao deletar tag:', err);
-    res.status(500).json({ message: 'Erro ao deletar tag' });
-  }
-});
-
-// Client Tags Association API
-app.get('/api/clients/:id/tags', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ message: 'ID inválido' });
-  try {
-    const { rows } = await pool.query(
-      `SELECT t.id::text as id, t.name, t.color, t.user_id, t.created_at
-       FROM contact_tags ct
-       JOIN tags t ON t.id = ct.tag_id
-       WHERE ct.contact_id = $1
-       ORDER BY t.name ASC`,
-      [id]
+    const { id } = req.params;
+    const { shortcut, message } = req.body || {};
+    const { rows } = await asyncQuery(
+      'update quick_responses set shortcut=coalesce($2, shortcut), message=coalesce($3, message) where id=$1 returning *',
+      [id, shortcut || null, message || null]
     );
+    if (!rows[0]) return res.status(404).json({ error: 'Mensagem rápida não encontrada' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/quick_responses/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await asyncQuery('delete from quick_responses where id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Products
+app.get('/products', async (_req, res) => {
+  try {
+    const { rows } = await asyncQuery('select * from products order by name asc', []);
     res.json(rows);
-  } catch (err) {
-    console.error('[DB] Erro ao listar etiquetas do cliente:', err);
-    res.status(500).json({ message: 'Erro ao listar etiquetas do cliente' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.delete('/api/clients/:id/tags', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ message: 'ID inválido' });
+app.post('/products', async (req, res) => {
   try {
-    const { rowCount } = await pool.query('DELETE FROM contact_tags WHERE contact_id = $1', [id]);
-    res.json({ status: 'deleted', count: rowCount });
-  } catch (err) {
-    console.error('[DB] Erro ao limpar etiquetas do cliente:', err);
-    res.status(500).json({ message: 'Erro ao limpar etiquetas do cliente' });
-  }
-});
-
-app.post('/api/clients/:id/tags', async (req, res) => {
-  if (!pool) return res.status(503).json({ message: 'Banco não configurado' });
-  const id = Number(req.params.id);
-  const { tag_ids } = req.body || {};
-  if (!Number.isFinite(id)) return res.status(400).json({ message: 'ID inválido' });
-  if (!Array.isArray(tag_ids)) return res.status(400).json({ message: 'tag_ids deve ser um array' });
-  const parsedTagIds = tag_ids.map((tid) => Number(tid)).filter((n) => Number.isFinite(n));
-  if (parsedTagIds.length !== tag_ids.length) return res.status(400).json({ message: 'tag_ids contém valores inválidos' });
-  try {
-    // Inserir uma a uma com proteção de conflito
-    for (const tid of parsedTagIds) {
-      await pool.query(
-        'INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [id, tid]
-      );
-    }
-    // Retornar lista atualizada
-    const { rows } = await pool.query(
-      `SELECT t.id::text as id, t.name, t.color, t.user_id, t.created_at
-       FROM contact_tags ct
-       JOIN tags t ON t.id = ct.tag_id
-       WHERE ct.contact_id = $1
-       ORDER BY t.name ASC`,
-      [id]
+    const { user_id, name, description, price, stock, image_url, category } = req.body || {};
+    if (!user_id || !name || price == null || stock == null) return res.status(400).json({ error: 'Dados inválidos' });
+    const id = String(Date.now());
+    const { rows } = await asyncQuery(
+      'insert into products (id, user_id, name, description, price, stock, image_url, category) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *',
+      [id, user_id, name, description || null, Number(price), Number(stock), image_url || null, category || null]
     );
-    res.status(201).json(rows);
-  } catch (err) {
-    console.error('[DB] Erro ao adicionar etiquetas ao cliente:', err);
-    res.status(500).json({ message: 'Erro ao adicionar etiquetas ao cliente' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Serve SPA static files
-if (fs.existsSync(DIST_DIR)) {
-  app.use(express.static(DIST_DIR));
-}
+app.patch('/products/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, price, stock, image_url, category } = req.body || {};
+    const { rows } = await asyncQuery(
+      'update products set name=coalesce($2, name), description=coalesce($3, description), price=coalesce($4, price), stock=coalesce($5, stock), image_url=coalesce($6, image_url), category=coalesce($7, category) where id=$1 returning *',
+      [id, name || null, description || null, price == null ? null : Number(price), stock == null ? null : Number(stock), image_url || null, category || null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Produto não encontrado' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-// SPA fallback to index.html
-app.get('*', (req, res, next) => {
-  if (!fs.existsSync(INDEX_HTML)) return next();
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(INDEX_HTML);
+app.delete('/products/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await asyncQuery('delete from products where id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`App ouvindo em http://0.0.0.0:${PORT}`);
-  console.log(`Webhook em http://0.0.0.0:${PORT}${WEBHOOK_PATH}`);
-  console.log(`Static dir: ${DIST_DIR}`);
+  console.log(`Backend server running on http://localhost:${PORT}`);
 });

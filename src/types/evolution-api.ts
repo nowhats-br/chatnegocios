@@ -1,104 +1,56 @@
-/**
- * Types for Evolution API responses and requests
- */
+export interface EvolutionWebhookConfig {
+  url?: string;
+  enabled?: boolean;
+  events?: string[];
+  webhookByEvents?: boolean;
+  webhookBase64?: boolean;
+}
 
 export interface EvolutionInstanceCreateRequest {
   instanceName: string;
-  qrcode?: boolean;
-  integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
   token?: string;
+  qrcode?: boolean;
+  integration?: string;
+  webhook?: EvolutionWebhookConfig;
   number?: string;
-  businessId?: string;
-  webhook?: {
-    url: string;
-    enabled: boolean;
-    events: string[];
-  };
 }
 
 export interface EvolutionInstanceCreateResponse {
-  instance: {
-    instanceName: string;
-    status: EvolutionInstanceStatus;
-  };
-  hash: {
-    apikey: string;
-  };
-  webhook?: {
-    url: string;
-    enabled: boolean;
-  };
+  instance?: unknown;
+  message?: string;
+  status?: string;
 }
 
-export interface EvolutionInstanceConnectResponse {
-  pairingCode?: string;
-  code?: string; // QR Code base64
-  count?: number;
-  base64?: string; // Alternative QR Code field
-}
+export const STATUS_MAPPING = {
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+  WAITING_QR_CODE: 'connecting',
+  INITIALIZING: 'initializing',
+} as const;
 
-export interface EvolutionInstanceStatusResponse {
-  instance: {
-    instanceName: string;
-    status: EvolutionInstanceStatus;
-  };
-  connectionStatus?: {
-    state: 'open' | 'close' | 'connecting';
-    statusReason?: number;
-  };
-}
-
-export type EvolutionInstanceStatus = 
-  | 'CREATED'
-  | 'INITIALIZING' 
-  | 'DISCONNECTED'
-  | 'WAITING_QR_CODE'
-  | 'CONNECTED'
-  | 'CONNECTING'
-  | 'OPEN'
-  | 'CLOSE';
-
-export interface EvolutionApiError {
-  message: string;
-  error?: string;
-  statusCode?: number;
-}
-
-export interface EvolutionDeleteInstanceResponse {
-  status: 'SUCCESS' | 'ERROR';
-  message: string;
-}
-
-// Mapping between Evolution API status and our internal status
-export const STATUS_MAPPING: Record<EvolutionInstanceStatus, string> = {
-  'CREATED': 'disconnected',
-  'INITIALIZING': 'connecting',
-  'DISCONNECTED': 'disconnected',
-  'WAITING_QR_CODE': 'connecting',
-  'CONNECTED': 'connected',
-  'CONNECTING': 'connecting',
-  'OPEN': 'connected',
-  'CLOSE': 'disconnected',
-};
-
-// Status configuration for UI display
 export const STATUS_CONFIG = {
-  disconnected: { 
-    text: 'Desconectado', 
+  connected: {
+    text: 'Conectado',
+    bgColor: 'bg-green-100',
+    color: 'text-green-700',
+    action: null as string | null,
+  },
+  disconnected: {
+    text: 'Desconectado',
+    bgColor: 'bg-red-100',
+    color: 'text-red-700',
     action: 'Conectar',
-    color: 'text-red-600',
-    bgColor: 'bg-red-100'
   },
-  connecting: { 
-    text: 'Conectando...', 
-    action: null,
-    color: 'text-yellow-600',
-    bgColor: 'bg-yellow-100'
+  connecting: {
+    text: 'Conectando',
+    bgColor: 'bg-yellow-100',
+    color: 'text-yellow-700',
+    action: 'Aguardar QR',
   },
-  connected: { 
-    text: 'Conectado', 
-    action: 'Desconectar',
-    color: 'text-green-600',
-    bgColor: 'bg-green-100'
+  initializing: {
+    text: 'Inicializando',
+    bgColor: 'bg-blue-100',
+    color: 'text-blue-700',
+    action: 'Aguardando',
   },
-};
+} as const;

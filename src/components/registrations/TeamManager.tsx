@@ -117,28 +117,8 @@ const TeamManager: React.FC = () => {
       
       <Modal isOpen={isFormOpen} onClose={() => setFormOpen(false)} title={selectedTeam?.id ? 'Editar Equipe' : 'Nova Equipe'}>
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="name">Nome da Equipe</Label>
-            <Input
-              id="name"
-              value={selectedTeam?.name || ''}
-              onChange={(e) =>
-                setSelectedTeam((prev: Partial<Team> | null) => ({ ...(prev ?? {}), name: e.target.value }))
-              }
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <Label htmlFor="description">Descrição</Label>
-            <Textarea
-              id="description"
-              value={selectedTeam?.description || ''}
-              onChange={(e) =>
-                setSelectedTeam((prev: Partial<Team> | null) => ({ ...(prev ?? {}), description: e.target.value }))
-              }
-              className="mt-1"
-            />
-          </div>
+          <div><Label htmlFor="name">Nome da Equipe</Label><Input id="name" value={selectedTeam?.name || ''} onChange={e => setSelectedTeam(p => ({...p, name: e.target.value}))} className="mt-1" /></div>
+          <div><Label htmlFor="description">Descrição</Label><Textarea id="description" value={selectedTeam?.description || ''} onChange={e => setSelectedTeam(p => ({...p, description: e.target.value}))} className="mt-1" /></div>
           <div className="flex justify-end space-x-2 pt-4">
             <Button type="button" variant="ghost" onClick={() => setFormOpen(false)} disabled={isSubmitting}>Cancelar</Button>
             <Button type="submit" onClick={handleSave} disabled={isSubmitting}>{isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{selectedTeam?.id ? 'Salvar' : 'Criar'}</Button>
