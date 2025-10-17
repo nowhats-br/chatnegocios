@@ -45,6 +45,7 @@ if [[ ! -f "$ENV_FILE_EVO" ]]; then
 fi
 EVOLUTION_DOMAIN=$(grep '^EVOLUTION_DOMAIN=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
 VITE_EVOLUTION_API_KEY=$(grep '^VITE_EVOLUTION_API_KEY=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
+SERVER_URL=$(grep '^SERVER_URL=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
 if [[ -z "$EVOLUTION_DOMAIN" ]]; then
   echo "[ERRO] EVOLUTION_DOMAIN não definido em $ENV_FILE_EVO. Reinstale a Evolution com domínio válido." >&2
   exit 1
@@ -69,6 +70,7 @@ cat > "$ENV_FILE_CHAT" <<EOF
 CHATNEGOCIOS_DOMAIN=${CHATNEGOCIOS_DOMAIN}
 CHATNEGOCIOS_API_DOMAIN=${CHATNEGOCIOS_API_DOMAIN}
 EVOLUTION_DOMAIN=${EVOLUTION_DOMAIN}
+EVOLUTION_SERVER_URL=${SERVER_URL}
 PORT=3001
 CORS_ORIGINS=https://${CHATNEGOCIOS_DOMAIN}
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/chatnegocios
@@ -93,7 +95,7 @@ docker build -t chatnegocios-backend:latest -f "$PROJECT_DIR/Dockerfile.backend"
 echo "\n==> Construindo frontend com URLs/Chave (não altera Evolution)"
 BUILD_ARGS=(
   "--build-arg" "VITE_BACKEND_URL=https://${CHATNEGOCIOS_API_DOMAIN}"
-  "--build-arg" "VITE_EVOLUTION_API_URL=https://${EVOLUTION_DOMAIN}"
+  "--build-arg" "VITE_EVOLUTION_API_URL=${SERVER_URL:-https://${EVOLUTION_DOMAIN}}"
 )
 if [[ -n "$VITE_EVOLUTION_API_KEY" ]]; then
   BUILD_ARGS+=("--build-arg" "VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY}")
