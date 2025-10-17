@@ -35,8 +35,8 @@ echo "\n==> Criando redes Docker (proxy, app_net)"
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
-echo "\n==> Removendo Portainer (se existir)"
-for c in portainer; do
+echo "\n==> Removendo Portainer/Nginx (se existirem)"
+for c in portainer nginx-proxy nginx-proxy-acme; do
   if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
     echo "Parando/removendo ${c}..." && docker rm -f "${c}" || true
   fi
@@ -54,6 +54,7 @@ docker run -d \
   portainer/portainer-ce:latest
 
 INSTALL_TRAEFIK=${INSTALL_TRAEFIK:-0}
+INSTALL_NGINX=${INSTALL_NGINX:-0}
 ACME_EMAIL=${ACME_EMAIL:-}
 if [[ "$INSTALL_TRAEFIK" == "1" ]]; then
   if [[ -z "$ACME_EMAIL" ]]; then
@@ -64,8 +65,23 @@ if [[ "$INSTALL_TRAEFIK" == "1" ]]; then
   docker compose -f "$PROJECT_DIR/scripts/traefik-compose.yml" --env-file <(echo "ACME_EMAIL=${ACME_EMAIL}") up -d
 fi
 
+if [[ "$INSTALL_NGINX" == "1" ]]; then
+  if [[ -z "$ACME_EMAIL" ]]; then
+    echo "[ERRO] Para instalar Nginx com ACME, informe ACME_EMAIL (Let's Encrypt)." >&2
+    exit 1
+  fi
+  echo "\n==> Publicando Nginx proxy (Let's Encrypt)"
+  docker compose -f "$PROJECT_DIR/scripts/nginx-compose.yml" --env-file <(echo "ACME_EMAIL=${ACME_EMAIL}") up -d
+fi
+
 echo "\n=== Infra concluída ==="
 echo "Portainer: http://${SERVER_PUBLIC_IP:-SEU_SERVIDOR}:9000"
 if [[ "$INSTALL_TRAEFIK" == "1" ]]; then
-  echo "Traefik ativo nas portas 80/443."
+  echo "Proxy ativo: Traefik nas portas 80/443"
+fi
+if [[ "$INSTALL_NGINX" == "1" ]]; then
+  echo "Proxy ativo: Nginx nas portas 80/443"
+fi
+if [[ "$INSTALL_TRAEFIK" != "1" && "$INSTALL_NGINX" != "1" ]]; then
+  echo "Proxy desativado. Para HTTPS via domínio, habilite Traefik ou Nginx."
 fi
