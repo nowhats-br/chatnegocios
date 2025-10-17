@@ -21,6 +21,10 @@ if [[ -z "$CHATNEGOCIOS_DOMAIN" ]]; then
 fi
 
 CHATNEGOCIOS_API_DOMAIN="api.${CHATNEGOCIOS_DOMAIN}"
+SERVER_PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ -z "$SERVER_PUBLIC_IP" ]]; then
+  SERVER_PUBLIC_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | cut -d'/' -f1 | head -n1)"
+fi
 
 # Valida resolução DNS (chat e api.chat)
 if ! getent hosts "$CHATNEGOCIOS_DOMAIN" >/dev/null 2>&1; then
@@ -64,6 +68,20 @@ fi
 docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 
+# Detecta Traefik; se não estiver rodando, usa URLs HTTP por IP:porta
+USE_TRAEFIK=0
+if docker ps --format '{{.Names}}' | grep -q '^traefik$'; then
+  USE_TRAEFIK=1
+fi
+
+if [[ "$USE_TRAEFIK" -eq 1 ]]; then
+  BACKEND_URL="https://${CHATNEGOCIOS_API_DOMAIN}"
+  FRONTEND_ORIGIN="https://${CHATNEGOCIOS_DOMAIN}"
+else
+  BACKEND_URL="http://${SERVER_PUBLIC_IP}:3001"
+  FRONTEND_ORIGIN="http://${SERVER_PUBLIC_IP}:8081"
+fi
+
 echo "\n==> Escrevendo .env.chatnegocios"
 cat > "$ENV_FILE_CHAT" <<EOF
 # Gerado pelo install-chatnegocios.sh
@@ -72,7 +90,7 @@ CHATNEGOCIOS_API_DOMAIN=${CHATNEGOCIOS_API_DOMAIN}
 EVOLUTION_DOMAIN=${EVOLUTION_DOMAIN}
 EVOLUTION_SERVER_URL=${SERVER_URL}
 PORT=3001
-CORS_ORIGINS=https://${CHATNEGOCIOS_DOMAIN}
+CORS_ORIGINS=${FRONTEND_ORIGIN}
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/chatnegocios
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
@@ -94,8 +112,8 @@ docker build -t chatnegocios-backend:latest -f "$PROJECT_DIR/Dockerfile.backend"
 
 echo "\n==> Construindo frontend com URLs/Chave (não altera Evolution)"
 BUILD_ARGS=(
-  "--build-arg" "VITE_BACKEND_URL=https://${CHATNEGOCIOS_API_DOMAIN}"
-  "--build-arg" "VITE_EVOLUTION_API_URL=${SERVER_URL:-https://${EVOLUTION_DOMAIN}}"
+  "--build-arg" "VITE_BACKEND_URL=${BACKEND_URL}"
+  "--build-arg" "VITE_EVOLUTION_API_URL=${SERVER_URL}"
 )
 if [[ -n "$VITE_EVOLUTION_API_KEY" ]]; then
   BUILD_ARGS+=("--build-arg" "VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY}")
@@ -106,9 +124,15 @@ echo "\n==> Publicando ChatNegocios (frontend + backend)"
 docker compose -f "$PROJECT_DIR/scripts/chatnegocios-compose.yml" --env-file "$ENV_FILE_CHAT" up -d --remove-orphans
 
 echo "\n=== ChatNegocios instalado ==="
-echo "Frontend: https://${CHATNEGOCIOS_DOMAIN}"
-echo "Backend: https://${CHATNEGOCIOS_API_DOMAIN}"
-echo "Webhook Evolution: https://${CHATNEGOCIOS_API_DOMAIN}/api/whatsapp/webhook"
+if [[ "$USE_TRAEFIK" -eq 1 ]]; then
+  echo "Frontend: https://${CHATNEGOCIOS_DOMAIN}"
+  echo "Backend: https://${CHATNEGOCIOS_API_DOMAIN}"
+  echo "Webhook Evolution: https://${CHATNEGOCIOS_API_DOMAIN}/api/whatsapp/webhook"
+else
+  echo "Frontend: ${FRONTEND_ORIGIN}"
+  echo "Backend: ${BACKEND_URL}"
+  echo "Webhook Evolution: ${BACKEND_URL}/api/whatsapp/webhook"
+fi
 if [[ -n "$VITE_EVOLUTION_API_KEY" ]]; then
   echo "Chave Evolution utilizada no frontend: ${VITE_EVOLUTION_API_KEY}"
 else

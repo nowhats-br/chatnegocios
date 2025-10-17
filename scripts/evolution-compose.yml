@@ -29,7 +29,16 @@ services:
     depends_on:
       - evolution_postgres
       - evolution_redis
+    labels:
+      - traefik.enable=${TRAEFIK_ENABLE}
+      - traefik.http.routers.evolution.rule=Host(`${EVOLUTION_DOMAIN}`)
+      - traefik.http.routers.evolution.entrypoints=websecure
+      - traefik.http.routers.evolution.tls=true
+      - traefik.http.routers.evolution.tls.certresolver=le
+      - traefik.http.services.evolution.loadbalancer.server.port=8080
+      - traefik.docker.network=proxy
     networks:
+      - proxy
       - app_net
 
   evolution_postgres:
@@ -73,5 +82,7 @@ volumes:
   evolution_redis_data:
 
 networks:
+  proxy:
+    external: true
   app_net:
     external: true

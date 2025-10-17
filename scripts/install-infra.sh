@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Infra Installer — instala Docker, cria rede e sobe Portainer (sem Traefik)
-# Uso: sudo bash scripts/install-infra.sh
+# Infra Installer — instala Docker, cria redes e sobe Portainer; Traefik opcional
+# Uso Portainer apenas: sudo bash scripts/install-infra.sh
+# Uso com Traefik (HTTPS): INSTALL_TRAEFIK=1 ACME_EMAIL=seu@email sudo -E bash scripts/install-infra.sh
 
 if [[ $(id -u) -ne 0 ]]; then
   echo "[ERRO] Execute este script como root (sudo)." >&2
@@ -32,6 +33,7 @@ systemctl enable --now docker || true
 
 echo "\n==> Criando redes Docker (proxy, app_net)"
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
+docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
 echo "\n==> Removendo Portainer (se existir)"
 for c in portainer; do
@@ -51,5 +53,19 @@ docker run -d \
   --network app_net \
   portainer/portainer-ce:latest
 
+INSTALL_TRAEFIK=${INSTALL_TRAEFIK:-0}
+ACME_EMAIL=${ACME_EMAIL:-}
+if [[ "$INSTALL_TRAEFIK" == "1" ]]; then
+  if [[ -z "$ACME_EMAIL" ]]; then
+    echo "[ERRO] Para instalar Traefik, informe ACME_EMAIL (Let's Encrypt)." >&2
+    exit 1
+  fi
+  echo "\n==> Publicando Traefik (Let's Encrypt)"
+  docker compose -f "$PROJECT_DIR/scripts/traefik-compose.yml" --env-file <(echo "ACME_EMAIL=${ACME_EMAIL}") up -d
+fi
+
 echo "\n=== Infra concluída ==="
 echo "Portainer: http://${SERVER_PUBLIC_IP:-SEU_SERVIDOR}:9000"
+if [[ "$INSTALL_TRAEFIK" == "1" ]]; then
+  echo "Traefik ativo nas portas 80/443."
+fi

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Evolution Installer — publica Evolution API sem Traefik e gera public key
-# Uso interativo: sudo bash scripts/install-evolution.sh
-# Não-interativo: EVOLUTION_DOMAIN=api.seu.domino sudo -E bash scripts/install-evolution.sh
+# Evolution Installer — publica Evolution API com suporte a domínio/HTTPS (Traefik opcional)
+# Uso sem domínio (HTTP): sudo bash scripts/install-evolution.sh
+# Uso com domínio (HTTPS via Traefik): EVOLUTION_DOMAIN=api.seu.domino sudo -E bash scripts/install-evolution.sh
 # Opcional: VITE_EVOLUTION_API_KEY=chaveexistente sudo -E bash scripts/install-evolution.sh
 
 if [[ $(id -u) -ne 0 ]]; then
@@ -16,8 +16,17 @@ VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY:-}
 EVOLUTION_VERSION=${EVOLUTION_VERSION:-2.3.5}
 EVOLUTION_SOURCE_REPO=${EVOLUTION_SOURCE_REPO:-https://github.com/EvolutionAPI/evolution-api.git}
 
-# Domínio da Evolution é opcional quando sem Traefik
-if [[ -z "$EVOLUTION_DOMAIN" ]]; then
+TRAEFIK_ENABLE=${TRAEFIK_ENABLE:-}
+if [[ -n "$EVOLUTION_DOMAIN" ]]; then
+  TRAEFIK_ENABLE=${TRAEFIK_ENABLE:-true}
+  # Valida resolução DNS para evitar falhas de emissão de certificado
+  if ! getent hosts "$EVOLUTION_DOMAIN" >/dev/null 2>&1; then
+    echo "[ERRO] O domínio '$EVOLUTION_DOMAIN' não resolve para nenhum IP neste servidor." >&2
+    echo "       Crie um registro A/AAAA apontando para o IP do servidor e tente novamente." >&2
+    exit 1
+  fi
+else
+  TRAEFIK_ENABLE=${TRAEFIK_ENABLE:-false}
   echo "[INFO] EVOLUTION_DOMAIN não informado. Deploy seguirá sem Traefik, usando acesso por IP:8080."
 fi
 
@@ -86,15 +95,20 @@ if ! docker image inspect "${EVOLUTION_IMAGE}" >/dev/null 2>&1; then
 fi
 
 echo "\n==> Escrevendo .env.evolution"
+if [[ "$TRAEFIK_ENABLE" == "true" ]]; then
+  SERVER_URL_VAL="https://${EVOLUTION_DOMAIN}"
+else
+  SERVER_URL_VAL="http://${SERVER_PUBLIC_IP}:8080"
+fi
 cat > "$ENV_FILE_EVO" <<EOF
 # Gerado pelo install-evolution.sh
 EVOLUTION_DOMAIN=${EVOLUTION_DOMAIN}
 VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY}
 EVOLUTION_VERSION=${EVOLUTION_VERSION}
 EVOLUTION_IMAGE=${EVOLUTION_IMAGE}
-# Sem Traefik: acessa via IP:8080 e defina a URL pública aqui
+TRAEFIK_ENABLE=${TRAEFIK_ENABLE}
 SERVER_TYPE=http
-SERVER_URL=http://${SERVER_PUBLIC_IP}:8080
+SERVER_URL=${SERVER_URL_VAL}
 EOF
 
 echo "\n==> Removendo Evolution API (se existir)"
@@ -102,13 +116,19 @@ if docker ps -a --format '{{.Names}}' | grep -q '^evolution_api$'; then
   docker rm -f evolution_api || true
 fi
 
-echo "\n==> Garantindo rede Docker (app_net)"
+echo "\n==> Garantindo redes Docker (app_net, proxy)"
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
+docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 
 echo "\n==> Publicando Evolution API"
 docker compose -f "$PROJECT_DIR/scripts/evolution-compose.yml" --env-file "$ENV_FILE_EVO" up -d --remove-orphans
 
 echo "\n=== Evolution instalada ==="
-echo "Evolution API: http://${SERVER_PUBLIC_IP}:8080 (sem Traefik)"
+if [[ "$TRAEFIK_ENABLE" == "true" ]]; then
+  echo "Evolution API: https://${EVOLUTION_DOMAIN}"
+  echo "Traefik/CERT: aguarde emissão do certificado (porta 80/443 liberada, DNS ok)."
+else
+  echo "Evolution API: http://${SERVER_PUBLIC_IP}:8080 (sem Traefik)"
+fi
 echo "Evolution Public Key (AUTHENTICATION_API_KEY): ${VITE_EVOLUTION_API_KEY}"
 echo "Guarde esta chave; será usada pelo ChatNegocios."
