@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Infra Installer — instala Docker, cria redes, sobe Portainer e Traefik (ACME/SSL)
-# Uso interativo: sudo bash scripts/install-infra.sh
-# Uso não-interativo: ACME_EMAIL=seu@email sudo -E bash scripts/install-infra.sh
+# Infra Installer — instala Docker, cria rede e sobe Portainer (sem Traefik)
+# Uso: sudo bash scripts/install-infra.sh
 
 if [[ $(id -u) -ne 0 ]]; then
   echo "[ERRO] Execute este script como root (sudo)." >&2
   exit 1
 fi
 
-ACME_EMAIL=${ACME_EMAIL:-}
-if [[ -z "$ACME_EMAIL" ]]; then
-  read -rp "Informe o e-mail para SSL (ACME/Let's Encrypt): " ACME_EMAIL
-fi
-if [[ -z "$ACME_EMAIL" ]]; then
-  echo "[ERRO] E-mail ACME é obrigatório." >&2
-  exit 1
+SERVER_PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ -z "$SERVER_PUBLIC_IP" ]]; then
+  SERVER_PUBLIC_IP="$(ip -4 addr show 2>/dev/null | awk '/inet /{print $2}' | cut -d'/' -f1 | head -n1)"
 fi
 
 PROJECT_DIR="$(pwd)"
-ENV_FILE_INfra="${PROJECT_DIR}/.env.infra"
 
 echo "\n==> Verificando/instalando Docker e Compose"
 if ! command -v docker >/dev/null 2>&1; then
@@ -37,17 +31,10 @@ fi
 systemctl enable --now docker || true
 
 echo "\n==> Criando redes Docker (proxy, app_net)"
-docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 
-echo "\n==> Escrevendo .env.infra"
-cat > "$ENV_FILE_INfra" <<EOF
-# Gerado pelo install-infra.sh
-ACME_EMAIL=${ACME_EMAIL}
-EOF
-
-echo "\n==> Removendo Portainer/Traefik (se existirem)"
-for c in traefik portainer; do
+echo "\n==> Removendo Portainer (se existir)"
+for c in portainer; do
   if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
     echo "Parando/removendo ${c}..." && docker rm -f "${c}" || true
   fi
@@ -61,12 +48,8 @@ docker run -d \
   --restart=always \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v portainer_data:/data \
-  --network proxy \
+  --network app_net \
   portainer/portainer-ce:latest
 
-echo "\n==> Publicando Traefik (com Let's Encrypt)"
-docker compose -f "$PROJECT_DIR/scripts/traefik-compose.yml" --env-file "$ENV_FILE_INfra" up -d
-
 echo "\n=== Infra concluída ==="
-echo "Portainer: http://SEU_SERVIDOR:9000"
-echo "Traefik ativo nas portas 80/443."
+echo "Portainer: http://${SERVER_PUBLIC_IP:-SEU_SERVIDOR}:9000"
