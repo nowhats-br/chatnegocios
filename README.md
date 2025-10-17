@@ -1,50 +1,73 @@
-Chat Negócios — Configuração de Evolution API
+Chat Negócios — Instalação Profissional (Infra, Evolution, ChatNegocios)
 
-Webhooks
----------
-- O webhook da Evolution API deve apontar para um endpoint PÚBLICO seu, capaz de receber requisições HTTP (POST) e processar eventos (ex.: mensagens, atualização de conexão, QR code atualizado).
-- Não use a URL do provedor da Evolution como webhook. Essa URL é a origem dos eventos, não o destino. O destino deve ser um serviço seu.
-- Configure `VITE_EVOLUTION_WEBHOOK_URL` com a sua URL pública (ex.: `https://seu-dominio.com/api/evolution/webhook`). Em desenvolvimento, use um túnel (ngrok, Cloudflared) e aponte para esse endereço público.
-- Se `VITE_EVOLUTION_WEBHOOK_URL` não estiver definida, a criação de instância enviará o webhook como desabilitado para evitar apontar incorretamente para `localhost`.
-
-Diferença: URL base da API vs Webhook (destino)
------------------------------------------------
-- `VITE_EVOLUTION_API_URL` é a URL base do seu provedor Evolution (ex.: `https://evo.nowhats.com.br`). É onde o app faz requisições para criar/gerar QR/etc.
-- `VITE_EVOLUTION_WEBHOOK_URL` é a SUA URL pública que recebe os eventos via POST.
-- Exemplo incorreto de webhook (não usar): `https://evo.nowhats.com.br/api/evolution/webhook`.
-- Exemplo correto de webhook: `https://seu-dominio.com/api/evolution/webhook` (ou URL de túnel em dev).
-
-QR Code — Endpoint
-------------------
-- Provedores diferentes expõem o QR em rotas diferentes. Para adequar ao seu provedor, defina `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE` usando `{instanceName}` como placeholder.
-- Exemplos válidos:
-  - `/instance/qrCode/{instanceName}`
-  - `/instance/connect/{instanceName}/qrcode`
-- O app tentará primeiro o template configurado e depois fallbacks comuns. Se o QR retornar 404, ajuste o template conforme a documentação do seu provedor.
-
-Variáveis de ambiente
----------------------
-- `VITE_BACKEND_URL`: URL base do backend Express (ex.: `http://localhost:3001`).
-- `PORT`: Porta do backend Express (ex.: `3001`).
-- `VITE_EVOLUTION_API_URL`: URL base da Evolution API do seu provedor (ex.: `https://evo.nowhats.com.br`).
-- `VITE_EVOLUTION_API_KEY`: Chave da API fornecida pelo seu provedor.
-- `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`: Template opcional para a rota do QR.
-- `VITE_EVOLUTION_WEBHOOK_URL`: URL pública do seu endpoint receptor de webhooks.
-- `DATABASE_URL`: String de conexão do Postgres (ex.: `postgresql://usuario:senha@host:5432/chatnegocios`). Se não definido, o backend usa um banco em memória para desenvolvimento.
-
-Exemplo de `.env`
-------------------
-- Utilize o arquivo `.env.example` deste repositório como base:
-  - Copie para `.env` e ajuste os valores conforme seu ambiente.
-  - Se estiver usando Traefik/Portainer, você pode acessar a Evolution em `http://evolution.localtest.me`.
-
-Supabase removido
------------------
-- Este projeto migrou para backend Express + REST; variáveis antigas de Supabase (ex.: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) não são mais utilizadas.
-- Remova linhas antigas de Supabase do seu `.env` para evitar confusão.
-
-Observações
+Visão geral
 -----------
-- Reinicie o processo de desenvolvimento (`npm run dev`) após alterar o `.env`.
-- Em produção, hospede o endpoint de webhook em um backend ou função serverless (Supabase Edge Functions, Cloudflare Workers, Express em Railway/Render, etc.).
- - Se definir `DATABASE_URL`, garanta que o Postgres esteja acessível e com o database criado; do contrário, o backend cairá em erro de conexão.
+- Stack em Docker com Traefik (SSL/ACME), Evolution API (Postgres + Redis) e ChatNegocios (backend + frontend + Postgres).
+- Instalação separada por etapas, sem reinstalar a Evolution ao instalar o ChatNegocios.
+
+Pré‑requisitos
+--------------
+- DNS com registros válidos:
+  - `EVOLUTION_DOMAIN` (A/AAAA para o IP do servidor)
+  - `CHATNEGOCIOS_DOMAIN` (A/AAAA para o IP do servidor)
+  - `api.<CHATNEGOCIOS_DOMAIN>` (CNAME para `CHATNEGOCIOS_DOMAIN` ou A/AAAA próprio)
+- Porta 80/443 liberadas no firewall para o Traefik emitir e servir certificados.
+
+Instalação (produção)
+---------------------
+1) Infraestrutura (Traefik + redes + Portainer)
+   - `ACME_EMAIL=suporte@nowhats.com.br sudo -E bash scripts/install-infra.sh`
+
+2) Evolution API (Postgres + Redis)
+   - `EVOLUTION_DOMAIN=evoapi.nowhats.com.br sudo -E bash scripts/install-evolution.sh`
+   - Ao final, copie a chave impressa: `AUTHENTICATION_API_KEY`.
+
+3) ChatNegocios (Postgres + backend + frontend)
+   - `CHATNEGOCIOS_DOMAIN=chatvendas.nowhats.com.br sudo -E bash scripts/install-chatnegocios.sh`
+   - O instalador lê `EVOLUTION_DOMAIN` e `VITE_EVOLUTION_API_KEY` de `.env.evolution` e não toca na Evolution.
+
+Validações rápidas
+------------------
+- Traefik: `docker logs traefik | tail -n 200` e verifique emissão de certificado para os domínios.
+- Evolution:
+  - `docker logs evolution_api | tail -n 200`
+  - Acesse `https://evoapi.nowhats.com.br/docs` (ou `api-docs`) e verifique resposta HTTP 200.
+- ChatNegocios:
+  - Frontend: `https://chatvendas.nowhats.com.br`
+  - Backend: `https://api.chatvendas.nowhats.com.br`
+  - Webhook Evolution: `https://api.chatvendas.nowhats.com.br/api/whatsapp/webhook`
+
+Observações sobre Redis (Evolution v2)
+-------------------------------------
+- Redis é usado para cache. O compose já provisiona `evolution_redis` e exporta as variáveis:
+  - `CACHE_REDIS_ENABLED=true`, `CACHE_REDIS_URI=redis://evolution_redis:6379/6`, `CACHE_REDIS_TTL=604800`.
+- Se persistirem erros de "redis disconnected":
+  - Verifique rede: `docker exec evolution_api ping -c1 evolution_redis` e `nc -vz evolution_redis 6379`.
+  - Verifique saúde: `docker ps` e `docker logs evolution_redis | tail -n 200`.
+  - Como workaround temporário: desabilite Redis e habilite cache local (editar `scripts/evolution-compose.yml`):
+    - `CACHE_REDIS_ENABLED=false`, `CACHE_LOCAL_ENABLED=true`.
+
+Webhook (destino)
+-----------------
+- Configure `VITE_EVOLUTION_WEBHOOK_URL` apontando para o seu backend público (POST).
+- Não aponte o webhook para a própria Evolution; o destino é o seu serviço.
+
+Ambiente (.env)
+---------------
+- Use `.env.example` como base; ajuste backend, frontend e Evolution conforme seu ambiente.
+- Em desenvolvimento, use `http://localhost` e habilite um túnel (ngrok/Cloudflared) para testar webhooks.
+
+Troubleshooting
+---------------
+- Certificados:
+  - Se usar Cloudflare, desative o proxy (laranja) durante o HTTP‑01 até o Traefik concluir a validação.
+- DNS:
+  - Confirme resolução: `dig +short evoapi.nowhats.com.br`, `dig +short chatvendas.nowhats.com.br`, `dig +short api.chatvendas.nowhats.com.br`.
+- Rotas Traefik:
+  - Os serviços têm `traefik.docker.network=proxy` e rodam em `websecure` (443).
+
+Atualizações e reimplantação
+----------------------------
+- Para aplicar mudanças nos composes:
+  - `docker compose -f scripts/evolution-compose.yml --env-file .env.evolution up -d --remove-orphans`
+  - `docker compose -f scripts/chatnegocios-compose.yml --env-file .env.chatnegocios up -d --remove-orphans`

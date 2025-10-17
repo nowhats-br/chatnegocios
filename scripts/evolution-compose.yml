@@ -8,12 +8,17 @@ services:
     environment:
       # Usa a mesma chave definida no .env do projeto (VITE_EVOLUTION_API_KEY)
       - AUTHENTICATION_API_KEY=${VITE_EVOLUTION_API_KEY}
+      # Configuração do servidor (por trás do Traefik)
+      - SERVER_TYPE=http
+      - SERVER_URL=https://${EVOLUTION_DOMAIN}
+      - CORS_ORIGIN=*
       - DATABASE_ENABLED=true
       - DATABASE_PROVIDER=postgresql
       - DATABASE_CONNECTION_URI=postgresql://postgres:postgres@evolution_postgres:5432/evolution
       # Redis (cache) — necessário para Evolution v2.2.x
       - CACHE_REDIS_ENABLED=true
       - CACHE_REDIS_URI=redis://evolution_redis:6379/6
+      - CACHE_REDIS_TTL=604800
       - CACHE_REDIS_PREFIX_KEY=evolution
       - CACHE_REDIS_SAVE_INSTANCES=false
       - CACHE_LOCAL_ENABLED=false
@@ -48,6 +53,11 @@ services:
     networks:
       - app_net
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   evolution_redis:
     image: redis:7
@@ -59,6 +69,11 @@ services:
     networks:
       - app_net
     restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   evolution_store:
