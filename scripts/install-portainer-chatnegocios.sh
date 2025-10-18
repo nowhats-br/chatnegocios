@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Instalador Portainer + Traefik + ChatNegocios (Swarm)
 # Uso: sudo -E bash scripts/install-portainer-chatnegocios.sh
-# Variáveis opcionais: CHATNEGOCIOS_DOMAIN, CHATNEGOCIOS_API_DOMAIN, ACME_EMAIL, EVOLUTION_SERVER_URL
+# Variáveis opcionais: CHATNEGOCIOS_DOMAIN, CHATNEGOCIOS_API_DOMAIN, ACME_EMAIL
 
 if [[ $(id -u) -ne 0 ]]; then
   echo "[ERRO] Execute este script como root (sudo)." >&2
@@ -16,7 +16,6 @@ PROJECT_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 CHATNEGOCIOS_DOMAIN=${CHATNEGOCIOS_DOMAIN:-chatvendas.nowhats.com.br}
 CHATNEGOCIOS_API_DOMAIN=${CHATNEGOCIOS_API_DOMAIN:-brack.nowhats.com.br}
 ACME_EMAIL=${ACME_EMAIL:-suporte@nowhats.com.br}
-EVOLUTION_SERVER_URL=${EVOLUTION_SERVER_URL:-}
 
 SERVER_PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 if [[ -z "$SERVER_PUBLIC_IP" ]]; then
@@ -88,17 +87,11 @@ fi
 echo "\n==> Construindo imagens do ChatNegocios"
 # Backend
 docker build -t chatnegocios-backend:latest -f "$PROJECT_DIR/Dockerfile.backend" "$PROJECT_DIR"
-# Frontend (injeta URLs de backend/evolution)
-BUILD_ARGS=(
-  "--build-arg" "VITE_BACKEND_URL=https://${CHATNEGOCIOS_API_DOMAIN}"
-  "--build-arg" "VITE_EVOLUTION_API_URL=${EVOLUTION_SERVER_URL}"
-  "--build-arg" "VITE_EVOLUTION_WEBHOOK_URL=https://${CHATNEGOCIOS_API_DOMAIN}/api/whatsapp/webhook"
-)
-if [[ -n "$EVOLUTION_SERVER_URL" ]]; then
-  echo "Usando EVOLUTION_SERVER_URL=${EVOLUTION_SERVER_URL}"
-fi
-
-docker build "${BUILD_ARGS[@]}" -t chatnegocios-frontend:latest -f "$PROJECT_DIR/Dockerfile.frontend" "$PROJECT_DIR"
+# Frontend (injeta apenas URL do backend)
+docker build \
+  --build-arg VITE_BACKEND_URL="https://${CHATNEGOCIOS_API_DOMAIN}" \
+  -t chatnegocios-frontend:latest \
+  -f "$PROJECT_DIR/Dockerfile.frontend" "$PROJECT_DIR"
 
 # Tag + Push no registry local
 echo "\n==> Publicando imagens no registry local"
