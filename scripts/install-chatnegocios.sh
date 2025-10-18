@@ -83,7 +83,12 @@ fi
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 # Garante rede de proxy conforme ambiente
 # (usando nome 'chatnegocios' informado pelo usuário)
-docker network inspect chatnegocios >/dev/null 2>&1 || docker network create chatnegocios
+SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo "inactive")
+if [[ "$SWARM_STATE" == "active" ]]; then
+  docker network inspect chatnegocios >/dev/null 2>&1 || docker network create --driver overlay --attachable chatnegocios
+else
+  docker network inspect chatnegocios >/dev/null 2>&1 || docker network create chatnegocios
+fi
 
 # Detecta proxy (Traefik ou Nginx); se não estiver rodando, usa URLs HTTP por IP:porta
 USE_PROXY=0
