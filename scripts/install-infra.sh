@@ -36,7 +36,24 @@ echo "\n==> Criando redes Docker (chatnegocios, app_net)"
 # Garante rede de proxy conforme ambiente (usando nome 'chatnegocios')
 SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo "inactive")
 if [[ "$SWARM_STATE" == "active" ]]; then
-  docker network inspect chatnegocios >/dev/null 2>&1 || docker network create --driver overlay --attachable chatnegocios
+  if docker network inspect chatnegocios >/dev/null 2>&1; then
+    ATTACHABLE=$(docker network inspect chatnegocios -f '{{.Attachable}}' 2>/dev/null || echo "unknown")
+    if [[ "$ATTACHABLE" != "true" ]]; then
+      if [[ "${FORCE_RECREATE_NETWORK:-0}" == "1" ]]; then
+        echo "[INFO] Rede 'chatnegocios' existente com attachable=false. Recriando como overlay --attachable..."
+        docker network rm chatnegocios || true
+        docker network create --driver overlay --attachable chatnegocios
+      else
+        echo "[ERRO] A rede 'chatnegocios' (overlay) está com attachable=false."
+        echo "       Contêineres Docker não conseguem se anexar. Recrie a rede com:"
+        echo "       docker network rm chatnegocios && docker network create -d overlay --attachable chatnegocios"
+        echo "       (Se estiver em uso por stacks, remova-os antes em Portainer ou com docker stack rm)"
+        exit 1
+      fi
+    fi
+  else
+    docker network create --driver overlay --attachable chatnegocios
+  fi
 else
   docker network inspect chatnegocios >/dev/null 2>&1 || docker network create chatnegocios
 fi
