@@ -45,5 +45,6 @@ services:
 networks:
   proxy:
     external: true
+
   app_net:
     external: true
