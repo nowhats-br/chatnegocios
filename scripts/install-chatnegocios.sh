@@ -68,13 +68,13 @@ fi
 docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 
-# Detecta Traefik; se não estiver rodando, usa URLs HTTP por IP:porta
-USE_TRAEFIK=0
-if docker ps --format '{{.Names}}' | grep -q '^traefik$'; then
-  USE_TRAEFIK=1
+# Detecta proxy (Traefik ou Nginx); se não estiver rodando, usa URLs HTTP por IP:porta
+USE_PROXY=0
+if docker ps --format '{{.Names}}' | grep -q '^traefik$' || docker ps --format '{{.Names}}' | grep -q '^nginx-proxy$'; then
+  USE_PROXY=1
 fi
 
-if [[ "$USE_TRAEFIK" -eq 1 ]]; then
+if [[ "$USE_PROXY" -eq 1 ]]; then
   BACKEND_URL="https://${CHATNEGOCIOS_API_DOMAIN}"
   FRONTEND_ORIGIN="https://${CHATNEGOCIOS_DOMAIN}"
 else

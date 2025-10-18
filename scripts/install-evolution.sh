@@ -95,7 +95,8 @@ if ! docker image inspect "${EVOLUTION_IMAGE}" >/dev/null 2>&1; then
 fi
 
 echo "\n==> Escrevendo .env.evolution"
-if [[ "$TRAEFIK_ENABLE" == "true" ]]; then
+# Define URL pública conforme proxy ativo (nginx/traefik) ou IP:porta
+if [[ -n "$EVOLUTION_DOMAIN" ]] && (docker ps --format '{{.Names}}' | grep -q '^nginx-proxy$' || docker ps --format '{{.Names}}' | grep -q '^traefik$'); then
   SERVER_URL_VAL="https://${EVOLUTION_DOMAIN}"
 else
   SERVER_URL_VAL="http://${SERVER_PUBLIC_IP}:8080"
@@ -124,11 +125,14 @@ echo "\n==> Publicando Evolution API"
 docker compose -f "$PROJECT_DIR/scripts/evolution-compose.yml" --env-file "$ENV_FILE_EVO" up -d --remove-orphans
 
 echo "\n=== Evolution instalada ==="
-if [[ "$TRAEFIK_ENABLE" == "true" ]]; then
-  echo "Evolution API: https://${EVOLUTION_DOMAIN}"
-  echo "Traefik/CERT: aguarde emissão do certificado (porta 80/443 liberada, DNS ok)."
+if docker ps --format '{{.Names}}' | grep -q '^nginx-proxy$'; then
+  echo "Evolution API: https://${EVOLUTION_DOMAIN} (via Nginx)"
+  echo "Certificado: acompanhe em 'docker logs nginx-proxy-acme'"
+elif docker ps --format '{{.Names}}' | grep -q '^traefik$'; then
+  echo "Evolution API: https://${EVOLUTION_DOMAIN} (via Traefik)"
+  echo "Certificado: acompanhe em 'docker logs traefik'"
 else
-  echo "Evolution API: http://${SERVER_PUBLIC_IP}:8080 (sem Traefik)"
+  echo "Evolution API: http://${SERVER_PUBLIC_IP}:8080 (sem proxy)"
 fi
 echo "Evolution Public Key (AUTHENTICATION_API_KEY): ${VITE_EVOLUTION_API_KEY}"
 echo "Guarde esta chave; será usada pelo ChatNegocios."
