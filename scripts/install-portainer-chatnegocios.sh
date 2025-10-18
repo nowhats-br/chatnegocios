@@ -14,7 +14,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 
 # Domínios solicitados
 CHATNEGOCIOS_DOMAIN=${CHATNEGOCIOS_DOMAIN:-chatvendas.nowhats.com.br}
-CHATNEGOCIOS_API_DOMAIN=${CHATNEGOCIOS_API_DOMAIN:-brack.nowhats.com.br}
+CHATNEGOCIOS_API_DOMAIN=${CHATNEGOCIOS_API_DOMAIN:-back.nowhats.com.br}
 ACME_EMAIL=${ACME_EMAIL:-suporte@nowhats.com.br}
 
 SERVER_PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
