@@ -31,9 +31,9 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 systemctl enable --now docker || true
 
-echo "\n==> Criando redes Docker (proxy, app_net)"
+echo "\n==> Criando redes Docker (chatnegocios, app_net)"
 
-docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
+docker network inspect chatnegocios >/dev/null 2>&1 || docker network create chatnegocios
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 
 echo "\n==> Removendo Portainer/Nginx (se existirem)"

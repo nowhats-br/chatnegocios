@@ -81,8 +81,9 @@ fi
 
 # Garante redes Docker
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
-# Garante rede de proxy para Traefik/Nginx quando existir
-docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
+# Garante rede de proxy conforme ambiente
+# (usando nome 'chatnegocios' informado pelo usuário)
+docker network inspect chatnegocios >/dev/null 2>&1 || docker network create chatnegocios
 
 # Detecta proxy (Traefik ou Nginx); se não estiver rodando, usa URLs HTTP por IP:porta
 USE_PROXY=0

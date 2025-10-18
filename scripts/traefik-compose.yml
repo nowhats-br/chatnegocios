@@ -10,7 +10,7 @@ services:
       - --api.dashboard=true
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=proxy
+      - --providers.docker.network=chatnegocios
       - --log.level=DEBUG
       - --entryPoints.web.address=:80
       - --entryPoints.websecure.address=:443
@@ -22,11 +22,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_letsencrypt:/letsencrypt
     networks:
-      - proxy
+      - chatnegocios
     restart: always
 
 networks:
-  proxy:
+  chatnegocios:
     external: true
 
 volumes:

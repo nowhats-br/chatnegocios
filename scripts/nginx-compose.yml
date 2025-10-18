@@ -14,7 +14,7 @@ services:
     environment:
       - SSL_POLICY=Mozilla-Modern
     networks:
-      - proxy
+      - chatnegocios
     restart: always
 
   nginx-proxy-acme:
@@ -29,11 +29,11 @@ services:
       - NGINX_PROXY_CONTAINER=nginx-proxy
       - DEFAULT_EMAIL=${ACME_EMAIL}
     networks:
-      - proxy
+      - chatnegocios
     restart: always
 
 networks:
-  proxy:
+  chatnegocios:
     external: true
 
 volumes:
