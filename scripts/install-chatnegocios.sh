@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ChatNegocios Installer — publica Postgres e ChatNegocios (frontend+backend)
 # Uso interativo: sudo bash scripts/install-chatnegocios.sh
-# Não-interativo: CHATNEGOCIOS_DOMAIN=chat.seu.domino EVOLUTION_DOMAIN=evoapi.seu.domino sudo -E bash scripts/install-chatnegocios.sh
+# Não-interativo: CHATNEGOCIOS_DOMAIN=chat.seu.domino EVOLUTION_SERVER_URL=https://evoapi.seu.domino VITE_EVOLUTION_API_KEY=sua_chave sudo -E bash scripts/install-chatnegocios.sh
 
 if [[ $(id -u) -ne 0 ]]; then
   echo "[ERRO] Execute este script como root (sudo)." >&2
@@ -34,7 +34,6 @@ if ! getent hosts "$CHATNEGOCIOS_DOMAIN" >/dev/null 2>&1; then
 fi
 if ! getent hosts "$CHATNEGOCIOS_API_DOMAIN" >/dev/null 2>&1; then
   echo "[AVISO] O subdomínio '$CHATNEGOCIOS_API_DOMAIN' não resolve." >&2
-  echo "        Recomenda-se criar um CNAME 'api' apontando para '$CHATNEGOCIOS_DOMAIN' ou um A/AAAA próprio." >&2
   echo "        O deploy seguirá, mas o Traefik só roteará quando o DNS estiver correto." >&2
 fi
 
@@ -42,20 +41,36 @@ PROJECT_DIR="$(pwd)"
 ENV_FILE_CHAT="${PROJECT_DIR}/.env.chatnegocios"
 ENV_FILE_EVO="${PROJECT_DIR}/.env.evolution"
 
-# Carrega domínio e chave da Evolution a partir de .env.evolution
-if [[ ! -f "$ENV_FILE_EVO" ]]; then
-  echo "[ERRO] .env.evolution não encontrado. Execute primeiro: EVOLUTION_DOMAIN=seu.dominio sudo -E bash scripts/install-evolution.sh" >&2
+# Permite Evolution externa via variáveis EVOLUTION_SERVER_URL e VITE_EVOLUTION_API_KEY
+EVOLUTION_SERVER_URL_INPUT="${EVOLUTION_SERVER_URL:-}"
+VITE_EVOLUTION_API_KEY_INPUT="${VITE_EVOLUTION_API_KEY:-}"
+
+EVOLUTION_DOMAIN=""
+VITE_EVOLUTION_API_KEY="$VITE_EVOLUTION_API_KEY_INPUT"
+SERVER_URL="$EVOLUTION_SERVER_URL_INPUT"
+
+# Se .env.evolution existir, usa como fonte padrão
+if [[ -f "$ENV_FILE_EVO" ]]; then
+  EVOLUTION_DOMAIN=$(grep '^EVOLUTION_DOMAIN=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
+  if [[ -z "$VITE_EVOLUTION_API_KEY" ]]; then
+    VITE_EVOLUTION_API_KEY=$(grep '^VITE_EVOLUTION_API_KEY=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
+  fi
+  if [[ -z "$SERVER_URL" ]]; then
+    SERVER_URL=$(grep '^SERVER_URL=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
+  fi
+fi
+
+# Solicita URL da Evolution se ainda não obtida
+if [[ -z "$SERVER_URL" ]]; then
+  read -rp "Informe a URL da Evolution (ex: https://evolution.seudominio.com): " SERVER_URL
+fi
+if [[ -z "$SERVER_URL" ]]; then
+  echo "[ERRO] URL da Evolution é obrigatória. Defina EVOLUTION_SERVER_URL ou forneça via prompt." >&2
   exit 1
 fi
-EVOLUTION_DOMAIN=$(grep '^EVOLUTION_DOMAIN=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
-VITE_EVOLUTION_API_KEY=$(grep '^VITE_EVOLUTION_API_KEY=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
-SERVER_URL=$(grep '^SERVER_URL=' "$ENV_FILE_EVO" | head -n1 | cut -d'=' -f2 || true)
-if [[ -z "$EVOLUTION_DOMAIN" ]]; then
-  echo "[ERRO] EVOLUTION_DOMAIN não definido em $ENV_FILE_EVO. Reinstale a Evolution com domínio válido." >&2
-  exit 1
-fi
+
 if [[ -z "$VITE_EVOLUTION_API_KEY" ]]; then
-  echo "[AVISO] VITE_EVOLUTION_API_KEY não definido em $ENV_FILE_EVO. O frontend será construído sem chave; você poderá configurá-la dentro do app em Configurações."
+  echo "[AVISO] VITE_EVOLUTION_API_KEY não informado. O frontend será construído sem chave; você poderá configurá-la dentro do app em Configurações."
 fi
 
 # Verifica Docker Compose plugin
@@ -65,7 +80,6 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # Garante redes Docker
-docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 docker network inspect app_net >/dev/null 2>&1 || docker network create app_net
 
 # Detecta proxy (Traefik ou Nginx); se não estiver rodando, usa URLs HTTP por IP:porta
@@ -105,7 +119,6 @@ for c in chatnegocios_backend chatnegocios_frontend postgres; do
 done
 
 echo "\n==> Publicando Postgres"
-docker compose -f "$PROJECT_DIR/scripts/postgres-compose.yml" --env-file "$ENV_FILE_CHAT" up -d
 
 echo "\n==> Construindo backend"
 docker build -t chatnegocios-backend:latest -f "$PROJECT_DIR/Dockerfile.backend" "$PROJECT_DIR"
@@ -114,6 +127,7 @@ echo "\n==> Construindo frontend com URLs/Chave (não altera Evolution)"
 BUILD_ARGS=(
   "--build-arg" "VITE_BACKEND_URL=${BACKEND_URL}"
   "--build-arg" "VITE_EVOLUTION_API_URL=${SERVER_URL}"
+  "--build-arg" "VITE_EVOLUTION_WEBHOOK_URL=${BACKEND_URL}/api/whatsapp/webhook"
 )
 if [[ -n "$VITE_EVOLUTION_API_KEY" ]]; then
   BUILD_ARGS+=("--build-arg" "VITE_EVOLUTION_API_KEY=${VITE_EVOLUTION_API_KEY}")
@@ -124,7 +138,7 @@ echo "\n==> Publicando ChatNegocios (frontend + backend)"
 docker compose -f "$PROJECT_DIR/scripts/chatnegocios-compose.yml" --env-file "$ENV_FILE_CHAT" up -d --remove-orphans
 
 echo "\n=== ChatNegocios instalado ==="
-if [[ "$USE_TRAEFIK" -eq 1 ]]; then
+if [[ "$USE_PROXY" -eq 1 ]]; then
   echo "Frontend: https://${CHATNEGOCIOS_DOMAIN}"
   echo "Backend: https://${CHATNEGOCIOS_API_DOMAIN}"
   echo "Webhook Evolution: https://${CHATNEGOCIOS_API_DOMAIN}/api/whatsapp/webhook"
