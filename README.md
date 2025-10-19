@@ -1,73 +1,81 @@
-Chat Negócios — Instalação Profissional (Infra, Evolution, ChatNegocios)
+Chat Negócios — Deploy (Traefik + Backend + Frontend)
 
 Visão geral
 -----------
-- Stack em Docker com Traefik (SSL/ACME), Evolution API (Postgres + Redis) e ChatNegocios (backend + frontend + Postgres).
-- Instalação separada por etapas, sem reinstalar a Evolution ao instalar o ChatNegocios.
+- Stack em Docker com Traefik (SSL/ACME), ChatNegócios Backend e Frontend, e Postgres opcional.
+- Instaladores foram removidos; o deploy agora é feito via docker compose ou docker swarm com os arquivos da pasta `scripts`.
 
 Pré‑requisitos
 --------------
-- DNS com registros válidos:
-  - `EVOLUTION_DOMAIN` (A/AAAA para o IP do servidor)
-  - `CHATNEGOCIOS_DOMAIN` (A/AAAA para o IP do servidor)
-  - `api.<CHATNEGOCIOS_DOMAIN>` (CNAME para `CHATNEGOCIOS_DOMAIN` ou A/AAAA próprio)
-- Porta 80/443 liberadas no firewall para o Traefik emitir e servir certificados.
+- DNS com registros válidos para seus domínios públicos:
+  - `CHATNEGOCIOS_DOMAIN` (frontend) — ex.: `chatvendas.nowhats.com.br`
+  - `CHATNEGOCIOS_API_DOMAIN` (backend) — ex.: `back.nowhats.com.br`
+- Porta `80` e `443` liberadas no firewall/NAT para o Traefik.
+- Redes Docker criadas (se ainda não existirem):
+  - `docker network create chatnegocios`
+  - `docker network create app_net`
 
-Instalação (produção)
----------------------
-1) Infraestrutura (Traefik + redes + Portainer)
-   - `ACME_EMAIL=suporte@nowhats.com.br sudo -E bash scripts/install-infra.sh`
+SSL via Cloudflare (DNS‑01)
+--------------------------
+- Gere um token na Cloudflare com escopos restritos à sua zona:
+  - Permissões: `Zone.DNS:Edit` e `Zone.Zone:Read`
+  - Zona: a específica do seu domínio (ex.: `nowhats.com.br`)
+- Defina variáveis de ambiente antes do deploy do Traefik:
+  - PowerShell: `$env:ACME_EMAIL="seu-email@dominio.com"; $env:CF_API_TOKEN="SEU_TOKEN_CLOUDFLARE"`
+  - Bash: `export ACME_EMAIL="seu-email@dominio.com"; export CF_API_TOKEN="SEU_TOKEN_CLOUDFLARE"`
+- O Traefik já está configurado para DNS‑01 Cloudflare em `scripts/traefik-compose.yml`.
 
-2) Evolution API (Postgres + Redis)
-   - `EVOLUTION_DOMAIN=evoapi.nowhats.com.br sudo -E bash scripts/install-evolution.sh`
-   - Ao final, copie a chave impressa: `AUTHENTICATION_API_KEY`.
+Build das imagens
+-----------------
+- Backend:
+  - `docker build -t chatnegocios-backend:latest -f Dockerfile.backend .`
+- Frontend (injete a URL pública do backend):
+  - `docker build -t chatnegocios-frontend:latest -f Dockerfile.frontend --build-arg VITE_BACKEND_URL=https://<CHATNEGOCIOS_API_DOMAIN> .`
 
-3) ChatNegocios (Postgres + backend + frontend)
-   - `CHATNEGOCIOS_DOMAIN=chatvendas.nowhats.com.br sudo -E bash scripts/install-chatnegocios.sh`
-   - O instalador lê `EVOLUTION_DOMAIN` e `VITE_EVOLUTION_API_KEY` de `.env.evolution` e não toca na Evolution.
+Deploy
+------
+- Traefik:
+  - Compose: `docker compose -f scripts/traefik-compose.yml up -d`
+  - Swarm: `docker stack deploy -c scripts/traefik-compose.yml traefik`
+- Postgres (opcional):
+  - Compose: `docker compose -f scripts/postgres-compose.yml up -d`
+  - Swarm: `docker stack deploy -c scripts/postgres-compose.yml chatdb`
+- ChatNegócios (frontend + backend):
+  - Defina variáveis usadas nos labels do Traefik:
+    - PowerShell: `$env:CHATNEGOCIOS_DOMAIN="chatvendas.nowhats.com.br"; $env:CHATNEGOCIOS_API_DOMAIN="back.nowhats.com.br"`
+    - Bash: `export CHATNEGOCIOS_DOMAIN="chatvendas.nowhats.com.br"; export CHATNEGOCIOS_API_DOMAIN="back.nowhats.com.br"`
+  - Compose: `docker compose -f scripts/chatnegocios-compose.yml up -d`
+  - Swarm: `docker stack deploy -c scripts/chatnegocios-compose.yml chatnegocios`
+
+Variáveis de ambiente (serviços)
+--------------------------------
+- Backend (`scripts/chatnegocios-compose.yml`):
+  - `DATABASE_URL` — conexão Postgres (ex.: `postgres://user:pass@host:5432/dbname`). Se ausente, usa banco em memória (pg-mem).
+  - `CORS_ORIGINS` — origens permitidas separadas por vírgula (ex.: `https://chatvendas.nowhats.com.br`).
+- Traefik (`scripts/traefik-compose.yml`):
+  - `ACME_EMAIL` — email para Let’s Encrypt.
+  - `CF_API_TOKEN` — token Cloudflare para DNS‑01.
 
 Validações rápidas
 ------------------
-- Traefik: `docker logs traefik | tail -n 200` e verifique emissão de certificado para os domínios.
-- Evolution:
-  - `docker logs evolution_api | tail -n 200`
-  - Acesse `https://evoapi.nowhats.com.br/docs` (ou `api-docs`) e verifique resposta HTTP 200.
-- ChatNegocios:
-  - Frontend: `https://chatvendas.nowhats.com.br`
-  - Backend: `https://api.chatvendas.nowhats.com.br`
-  - Webhook Evolution: `https://api.chatvendas.nowhats.com.br/api/whatsapp/webhook`
-
-Observações sobre Redis (Evolution v2)
--------------------------------------
-- Redis é usado para cache. O compose já provisiona `evolution_redis` e exporta as variáveis:
-  - `CACHE_REDIS_ENABLED=true`, `CACHE_REDIS_URI=redis://evolution_redis:6379/6`, `CACHE_REDIS_TTL=604800`.
-- Se persistirem erros de "redis disconnected":
-  - Verifique rede: `docker exec evolution_api ping -c1 evolution_redis` e `nc -vz evolution_redis 6379`.
-  - Verifique saúde: `docker ps` e `docker logs evolution_redis | tail -n 200`.
-  - Como workaround temporário: desabilite Redis e habilite cache local (editar `scripts/evolution-compose.yml`):
-    - `CACHE_REDIS_ENABLED=false`, `CACHE_LOCAL_ENABLED=true`.
-
-Webhook (destino)
------------------
-- Configure `VITE_EVOLUTION_WEBHOOK_URL` apontando para o seu backend público (POST).
-- Não aponte o webhook para a própria Evolution; o destino é o seu serviço.
-
-Ambiente (.env)
----------------
-- Use `.env.example` como base; ajuste backend, frontend e Evolution conforme seu ambiente.
-- Em desenvolvimento, use `http://localhost` e habilite um túnel (ngrok/Cloudflared) para testar webhooks.
+- Traefik: `docker logs traefik --since 5m` e verifique emissão de certificados.
+- Rotas TLS:
+  - Frontend: `https://<CHATNEGOCIOS_DOMAIN>`
+  - Backend: `https://<CHATNEGOCIOS_API_DOMAIN>`
+- Teste rápido: `curl -I https://<domínio>` deve retornar `HTTP/2 200` e certificado válido da Let’s Encrypt.
 
 Troubleshooting
 ---------------
 - Certificados:
-  - Se usar Cloudflare, desative o proxy (laranja) durante o HTTP‑01 até o Traefik concluir a validação.
+  - Token inválido ou escopo incorreto na Cloudflare causa falha no desafio DNS.
+  - Verifique logs com `docker logs traefik --since 10m | findstr /i acme` (Windows) ou `grep -i acme` (Linux).
 - DNS:
-  - Confirme resolução: `dig +short evoapi.nowhats.com.br`, `dig +short chatvendas.nowhats.com.br`, `dig +short api.chatvendas.nowhats.com.br`.
-- Rotas Traefik:
-  - Os serviços têm `traefik.docker.network=proxy` e rodam em `websecure` (443).
+  - Confirme resolução: `dig +short <CHATNEGOCIOS_DOMAIN>` e `<CHATNEGOCIOS_API_DOMAIN>` apontando para o IP do servidor.
+- Frontend SPA:
+  - O Nginx do frontend já está com fallback SPA (`scripts/nginx.conf`).
 
-Atualizações e reimplantação
-----------------------------
-- Para aplicar mudanças nos composes:
-  - `docker compose -f scripts/evolution-compose.yml --env-file .env.evolution up -d --remove-orphans`
-  - `docker compose -f scripts/chatnegocios-compose.yml --env-file .env.chatnegocios up -d --remove-orphans`
+Notas
+-----
+- Evolution e instaladores foram removidos do projeto.
+- Para ambientes com Cloudflare proxy (nuvem laranja), DNS‑01 funciona normalmente.
+- Se preferir HTTP‑01, reconfigure Traefik (desabilite DNS‑01 e habilite httpchallenge, com porta 80 pública e proxy desligado temporariamente).
