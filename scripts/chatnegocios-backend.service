@@ -1,0 +1,22 @@
+[Unit]
+Description=ChatNegócios Backend (Node.js Express)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chatnegocios
+ExecStart=/usr/bin/node server/app.cjs
+Restart=on-failure
+# Carrega variáveis do .env (opcional)
+EnvironmentFile=-/opt/chatnegocios/.env
+# Sobrescreva portas/DB conforme necessário
+Environment=PORT=3201
+# Exemplo de Postgres na porta 5433 (sem conflito):
+# Environment=DATABASE_URL=postgresql://chat_user:chat_pass@127.0.0.1:5433/chatnegocios
+# Defina CORS para o domínio/porta do Nginx
+# Environment=CORS_ORIGINS=http://seu-dominio:8080
+User=chatnegocios
+Group=chatnegocios
+
+[Install]
+WantedBy=multi-user.target
