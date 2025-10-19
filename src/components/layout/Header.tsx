@@ -2,13 +2,21 @@ import React from 'react';
 import { Search, Bell, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../providers/theme-provider';
 import { useAuth } from '@/contexts/AuthContext';
+import Button from '@/components/ui/Button';
+import { useNavigate } from 'react-router-dom';
 
 const Header: React.FC = () => {
   const { theme, setTheme } = useTheme();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
   };
 
   const userInitial = user?.email?.charAt(0).toUpperCase() || '?';
@@ -33,6 +41,7 @@ const Header: React.FC = () => {
           <Bell className="h-5 w-5" />
           <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500" />
         </button>
+        <Button variant="outline" size="sm" onClick={handleLogout}>Sair</Button>
         <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold">
           {userInitial}
         </div>

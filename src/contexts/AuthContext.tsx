@@ -4,9 +4,10 @@ import { dbClient } from '@/lib/dbClient';
 interface AuthContextType {
   user: { id: string; email: string } | null;
   loading: boolean;
+  logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, loading: true });
+const AuthContext = createContext<AuthContextType>({ user: null, loading: true, logout: async () => {} });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
@@ -29,8 +30,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { mounted = false; };
   }, []);
 
+  const logout = async () => {
+    try {
+      await dbClient.auth.logout();
+    } catch (_) {
+      // swallow errors; ensure local state is cleared
+    }
+    try {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+    } catch (_) {}
+    setUser(null);
+    setLoading(false);
+  };
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, logout }}>
       {children}
     </AuthContext.Provider>
   );
