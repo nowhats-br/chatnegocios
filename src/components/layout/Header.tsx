@@ -2,8 +2,8 @@ import React from 'react';
 import { Search, Bell, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../providers/theme-provider';
 import { useAuth } from '@/contexts/AuthContext';
-import Button from '@/components/ui/Button';
 import { useNavigate } from 'react-router-dom';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 
 const Header: React.FC = () => {
   const { theme, setTheme } = useTheme();
@@ -41,10 +41,21 @@ const Header: React.FC = () => {
           <Bell className="h-5 w-5" />
           <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500" />
         </button>
-        <Button variant="outline" size="sm" onClick={handleLogout}>Sair</Button>
-        <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold">
-          {userInitial}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold focus:outline-none">
+              {userInitial}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[12rem]">
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); navigate('/configuracoes'); }}>
+              Configurações
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); handleLogout(); }} className="text-red-600">
+              Sair
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
