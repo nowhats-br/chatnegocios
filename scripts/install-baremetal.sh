@@ -17,6 +17,7 @@ if [ "${EUID}" -ne 0 ]; then echo "[ERRO] Execute como root (sudo)."; exit 1; fi
 FRONTEND_DOMAIN=""; BACKEND_DOMAIN=""; ENABLE_SSL="false"; EMAIL=""; APP_DIR="$(pwd)"; WEBROOT="/var/www/chatnegocios/frontend"
 DB_USER="chat_user"; DB_PASS="chat_pass"; DB_NAME="chatnegocios"; DB_PORT="5433"
 BACKEND_PORT="3201"; NGINX_PORT="8080"; EVOLUTION_API_URL=""; EVOLUTION_API_KEY=""; EVO_INSTANCE=""
+ACME_MODE="http"; CF_API_TOKEN=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,6 +28,7 @@ while [ $# -gt 0 ]; do
     --app-dir) APP_DIR="$2"; shift 2;; --webroot) WEBROOT="$2"; shift 2;;
     --db-user) DB_USER="$2"; shift 2;; --db-pass) DB_PASS="$2"; shift 2;; --db-name) DB_NAME="$2"; shift 2;; --db-port) DB_PORT="$2"; shift 2;;
     --backend-port) BACKEND_PORT="$2"; shift 2;; --nginx-port) NGINX_PORT="$2"; shift 2;;
+    --dns-cloudflare-token) CF_API_TOKEN="$2"; shift 2;;
     --evo-url) EVOLUTION_API_URL="$2"; shift 2;; --evo-key) EVOLUTION_API_KEY="$2"; shift 2;; --evo-instance) EVO_INSTANCE="$2"; shift 2;;
     *) echo "Argumento desconhecido: $1"; exit 1;;
   esac
@@ -63,10 +65,14 @@ create table if not exists contact_tags (contact_id int references contacts(id),
 SQL
 
 echo "[4/9] .env + build"; mkdir -p "$APP_DIR"
-# Origens separadas para frontend e backend
+# Origens separadas para frontend e backend (inclui porta customizada se não for 443)
 if [ "$ENABLE_SSL" = "true" ]; then
-  [ -n "$FRONTEND_DOMAIN" ] && FRONTEND_ORIGIN="https://${FRONTEND_DOMAIN}"
-  [ -n "$BACKEND_DOMAIN" ] && BACKEND_ORIGIN="https://${BACKEND_DOMAIN}"
+  if [ -n "$FRONTEND_DOMAIN" ]; then
+    if [ "$NGINX_PORT" = "443" ]; then FRONTEND_ORIGIN="https://${FRONTEND_DOMAIN}"; else FRONTEND_ORIGIN="https://${FRONTEND_DOMAIN}:${NGINX_PORT}"; fi
+  fi
+  if [ -n "$BACKEND_DOMAIN" ]; then
+    if [ "$NGINX_PORT" = "443" ]; then BACKEND_ORIGIN="https://${BACKEND_DOMAIN}"; else BACKEND_ORIGIN="https://${BACKEND_DOMAIN}:${NGINX_PORT}"; fi
+  fi
 else
   FRONTEND_ORIGIN="http://${FRONTEND_DOMAIN:-localhost}:${NGINX_PORT}"
   BACKEND_ORIGIN="http://${BACKEND_DOMAIN:-localhost}:${NGINX_PORT}"
