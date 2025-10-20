@@ -15,6 +15,7 @@ set -euo pipefail
 #     --dns-cloudflare-token "<TOKEN_CF>" \
 #     --chat-port 8081 --evolution-port 8080 --nginx-ssl-port 8443 \
 #     --chat-app-dir /opt/chatnegocios --chat-webroot /var/www/chatnegocios/frontend \
+#     --cf-propagation-seconds 120 \
 #     --install-portainer
 #
 # Após rodar, acesse:
@@ -40,6 +41,7 @@ NGINX_SSL_PORT=8443
 CHAT_APP_DIR="/opt/chatnegocios"
 CHAT_WEBROOT="/var/www/chatnegocios/frontend"
 INSTALL_PORTAINER=false
+CF_PROPAGATION_SECONDS=120
 
 # Parse argumentos simples
 while [[ $# -gt 0 ]]; do
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --nginx-ssl-port) NGINX_SSL_PORT="$2"; shift 2;;
     --chat-app-dir) CHAT_APP_DIR="$2"; shift 2;;
     --chat-webroot) CHAT_WEBROOT="$2"; shift 2;;
+    --cf-propagation-seconds) CF_PROPAGATION_SECONDS="$2"; shift 2;;
     --install-portainer) INSTALL_PORTAINER=true; shift;;
     *) echo "Argumento desconhecido: $1"; exit 1;;
   esac
@@ -100,6 +103,7 @@ fi
 
 # Purga sites padrão do Nginx e garante diretórios
 rm -f /etc/nginx/sites-enabled/default || true
+rm -f /etc/nginx/sites-enabled/default-ssl || true
 rm -f /etc/nginx/conf.d/default.conf || true
 mkdir -p /etc/nginx/conf.d
 
@@ -308,14 +312,45 @@ if [[ -f "$FULLCHAIN" ]]; then
   fi
 fi
 
+ISSUE_OK=false
 if [[ "$SHOULD_ISSUE" == true ]]; then
-  certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$CF_INI" \
-    -m "$EMAIL" -n --agree-tos "${CERT_ARGS[@]}"
+  for secs in "$CF_PROPAGATION_SECONDS" 180 300; do
+    log "Tentando emitir certificados (propagação DNS: ${secs}s)"
+    if certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$CF_INI" \
+         --dns-cloudflare-propagation-seconds "$secs" \
+         -m "$EMAIL" -n --agree-tos "${CERT_ARGS[@]}"; then
+      ISSUE_OK=true
+      break
+    else
+      log "Falha na emissão com ${secs}s; tentando novamente se houver próximos valores."
+    fi
+  done
 fi
 
 if [[ ! -d "$PRIMARY_DIR" ]]; then
-  echo "Diretório de certificado não encontrado: $PRIMARY_DIR" >&2
-  exit 1
+  log "Certificados reais indisponíveis; gerando autoassinado como fallback para ${EVOLUTION_DOMAIN}/${CHAT_FRONTEND_DOMAIN}/${CHAT_BACKEND_DOMAIN}"
+  mkdir -p "$PRIMARY_DIR"
+  SSLCFG="/etc/letsencrypt/selfsigned.cnf"
+  cat > "$SSLCFG" <<CFG
+[req]
+default_bits=2048
+distinguished_name=req_distinguished_name
+req_extensions=v3_req
+prompt=no
+
+[req_distinguished_name]
+CN=${EVOLUTION_DOMAIN}
+
+[v3_req]
+subjectAltName=@alt_names
+
+[alt_names]
+DNS.1=${EVOLUTION_DOMAIN}
+DNS.2=${CHAT_FRONTEND_DOMAIN}
+DNS.3=${CHAT_BACKEND_DOMAIN}
+CFG
+  openssl req -x509 -nodes -days 14 -newkey rsa:2048 \
+    -keyout "$PRIVKEY" -out "$FULLCHAIN" -config "$SSLCFG" -extensions v3_req
 fi
 
 # Nginx conf com SSL na porta customizada e proxy
@@ -386,6 +421,28 @@ server {
   }
 }
 NGINX
+
+# Cria redirecionamento HTTP->HTTPS somente se a porta 80 estiver livre
+if ! is_port_busy 80; then
+  log "Gerando redirecionamento HTTP (porta 80) para HTTPS:${NGINX_SSL_PORT}"
+  cat > /etc/nginx/conf.d/chatnegocios_redirect80.conf <<REDIR
+server {
+  listen 80;
+  server_name ${EVOLUTION_DOMAIN};
+  return 301 https://\$host:${NGINX_SSL_PORT}\$request_uri;
+}
+server {
+  listen 80;
+  server_name ${CHAT_BACKEND_DOMAIN};
+  return 301 https://\$host:${NGINX_SSL_PORT}\$request_uri;
+}
+server {
+  listen 80;
+  server_name ${CHAT_FRONTEND_DOMAIN};
+  return 301 https://\$host:${NGINX_SSL_PORT}\$request_uri;
+}
+REDIR
+fi
 
 nginx -t
 systemctl restart nginx
