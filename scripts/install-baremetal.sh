@@ -113,7 +113,19 @@ EOF
 systemctl daemon-reload || true; systemctl enable --now chatnegocios || true
 
 echo "[6/9] Nginx"
-NGCONF="/etc/nginx/sites-available/chatnegocios.conf"
+# Detecta diretório de conf do Nginx e garante que existe
+NG_SITES_AVAILABLE="/etc/nginx/sites-available"
+NG_SITES_ENABLED="/etc/nginx/sites-enabled"
+if [ -d "$NG_SITES_AVAILABLE" ]; then
+  NGCONF="$NG_SITES_AVAILABLE/chatnegocios.conf"
+  USE_SITES="1"
+else
+  NGCONF="/etc/nginx/conf.d/chatnegocios.conf"
+  USE_SITES="0"
+fi
+mkdir -p "$(dirname "$NGCONF")"
+[ "$USE_SITES" = "1" ] && mkdir -p "$NG_SITES_ENABLED"
+
 if [ "$ENABLE_SSL" = "true" ] && { [ -n "$FRONTEND_DOMAIN" ] || [ -n "$BACKEND_DOMAIN" ]; }; then
   if [ -n "$BACKEND_DOMAIN" ] && [ "$BACKEND_DOMAIN" != "$FRONTEND_DOMAIN" ]; then
     # Dois domínios distintos: um para frontend e outro para API
@@ -204,8 +216,8 @@ server {
 EOF
     DOMS=( -d "$FRONTEND_DOMAIN" )
   fi
-  ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf
-  rm -f /etc/nginx/sites-enabled/default || true
+  [ "$USE_SITES" = "1" ] && ln -sf "$NGCONF" "$NG_SITES_ENABLED/chatnegocios.conf"
+  [ "$USE_SITES" = "1" ] && rm -f "$NG_SITES_ENABLED/default" || true
   nginx -t || true; systemctl restart nginx || true
   apt-get install -y certbot python3-certbot-nginx || true
   if [ -n "$EMAIL" ] && [ ${#DOMS[@]} -gt 0 ]; then
@@ -225,8 +237,8 @@ server {
     gzip on; gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; gzip_min_length 1024;
 }
 EOF
-  ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf
-  rm -f /etc/nginx/sites-enabled/default || true
+  [ "$USE_SITES" = "1" ] && ln -sf "$NGCONF" "$NG_SITES_ENABLED/chatnegocios.conf"
+  [ "$USE_SITES" = "1" ] && rm -f "$NG_SITES_ENABLED/default" || true
   nginx -t || true; systemctl restart nginx || true
 fi
 
