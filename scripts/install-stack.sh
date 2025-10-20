@@ -82,7 +82,7 @@ log() { echo "[install] $*"; }
 log "Atualizando pacotes e instalando dependências básicas"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release jq nginx certbot python3-certbot-dns-cloudflare rsync
+apt-get install -y ca-certificates curl gnupg lsb-release jq nginx certbot python3-certbot-dns-cloudflare rsync git
 
 # Instalar Node.js LTS (v20) para backend ChatNegócios
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -119,35 +119,55 @@ fi
 # Diretórios das apps
 mkdir -p /opt/evolution /opt/chatnegocios "$CHAT_WEBROOT"
 
-# Evolution via Docker na porta 80
+# Evolution via Docker na porta ${EVOLUTION_PORT}
 if is_port_busy "$EVOLUTION_PORT"; then
   echo "A porta ${EVOLUTION_PORT} já está em uso. Libere-a ou altere --evolution-port." >&2
   exit 1
 fi
 
+# Tenta puxar imagem pública v2.3.4; se falhar, faz build local
+EVOLUTION_IMAGE="atendai/evolution-api:v2.3.4"
+LOCAL_EV_IMAGE="evolution-api:v2.3.4-local"
+log "Obtendo imagem do Evolution: ${EVOLUTION_IMAGE}"
+if ! docker pull "$EVOLUTION_IMAGE" >/dev/null 2>&1; then
+  log "Pull falhou. Construindo imagem local ${LOCAL_EV_IMAGE} a partir do repositório."
+  apt-get install -y git
+  rm -rf /opt/evolution/src || true
+  # Tenta usar a tag v2.3.4; se não existir, clona main
+  git clone --depth 1 --branch v2.3.4 https://github.com/EvolutionAPI/evolution-api.git /opt/evolution/src || \
+    git clone --depth 1 https://github.com/EvolutionAPI/evolution-api.git /opt/evolution/src
+  ( cd /opt/evolution/src && docker build -t "$LOCAL_EV_IMAGE" . )
+  USE_LOCAL_IMAGE=true
+else
+  USE_LOCAL_IMAGE=false
+fi
+
 log "Subindo Evolution na porta ${EVOLUTION_PORT}"
 cat > /opt/evolution/docker-compose.yml <<'YAML'
-version: "3.8"
+version: "3.9"
 services:
   evolution:
-    image: ghcr.io/evolution-api/evolution-api:latest
+    image: atendai/evolution-api:v2.3.4
     container_name: evolution
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:8080"
     environment:
-      - SERVER_PORT=80
       - LOG_LEVEL=info
-      # Ajuste outras variáveis necessárias conforme sua necessidade
     volumes:
-      - evolution_data:/data
+      - evolution_data:/evolution/instances
 volumes:
   evolution_data:
 YAML
 
-# Substitui mapeamento de portas se EVOLUTION_PORT != 80
-if [[ "$EVOLUTION_PORT" != "80" ]]; then
-  sed -i "s/\"80:80\"/\"${EVOLUTION_PORT}:80\"/" /opt/evolution/docker-compose.yml
+# Se a imagem local foi construída, usa ela no compose
+if [[ "$USE_LOCAL_IMAGE" == true ]]; then
+  sed -i "s|image: atendai/evolution-api:v2.3.4|image: ${LOCAL_EV_IMAGE}|" /opt/evolution/docker-compose.yml
+fi
+
+# Substitui mapeamento de portas se EVOLUTION_PORT != 8080
+if [[ "$EVOLUTION_PORT" != "8080" ]]; then
+  sed -i "s/\"8080:8080\"/\"${EVOLUTION_PORT}:8080\"/" /opt/evolution/docker-compose.yml
 fi
 
 ( cd /opt/evolution && docker compose up -d )
