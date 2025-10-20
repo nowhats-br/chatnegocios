@@ -1,81 +1,64 @@
-Chat Negócios — Deploy (Traefik + Backend + Frontend)
+Chat Negócios — Deploy Bare‑Metal (Nginx + Backend + Frontend)
 
 Visão geral
 -----------
-- Stack em Docker com Traefik (SSL/ACME), ChatNegócios Backend e Frontend, e Postgres opcional.
-- Instaladores foram removidos; o deploy agora é feito via docker compose ou docker swarm com os arquivos da pasta `scripts`.
+Este projeto não usa mais Docker nem Traefik. O deployment recomendado é bare‑metal com Nginx, Node.js e (opcionalmente) PostgreSQL, utilizando o instalador interativo.
 
 Pré‑requisitos
 --------------
-- DNS com registros válidos para seus domínios públicos:
-  - `CHATNEGOCIOS_DOMAIN` (frontend) — ex.: `chatvendas.nowhats.com.br`
-  - `CHATNEGOCIOS_API_DOMAIN` (backend) — ex.: `back.nowhats.com.br`
-- Porta `80` e `443` liberadas no firewall/NAT para o Traefik.
-- Redes Docker criadas (se ainda não existirem):
-  - `docker network create chatnegocios`
-  - `docker network create app_net`
+- Ubuntu/Debian com acesso root (sudo).
+- Node.js 20+ e Nginx (o instalador cuida disso).
+- DNS apontando para o servidor:
+  - Domínio do frontend (ex.: `app.seudominio.com`).
+  - Domínio do backend/API (ex.: `api.seudominio.com`).
+- Portas `80` e `443` liberadas no firewall/NAT.
 
-SSL via Cloudflare (DNS‑01)
---------------------------
-- Gere um token na Cloudflare com escopos restritos à sua zona:
-  - Permissões: `Zone.DNS:Edit` e `Zone.Zone:Read`
-  - Zona: a específica do seu domínio (ex.: `nowhats.com.br`)
-- Defina variáveis de ambiente antes do deploy do Traefik:
-  - PowerShell: `$env:ACME_EMAIL="seu-email@dominio.com"; $env:CF_API_TOKEN="SEU_TOKEN_CLOUDFLARE"`
-  - Bash: `export ACME_EMAIL="seu-email@dominio.com"; export CF_API_TOKEN="SEU_TOKEN_CLOUDFLARE"`
-- O Traefik já está configurado para DNS‑01 Cloudflare em `scripts/traefik-compose.yml`.
+Instalação
+----------
+1) Faça clone do repositório e acesse a pasta do projeto.
+2) Execute o instalador:
+   - `sudo bash scripts/install-baremetal.sh`
+3) Responda aos prompts:
+   - Domínio do frontend.
+   - Domínio do backend/API.
+   - Habilitar SSL (Let’s Encrypt) e e‑mail para Certbot.
+4) O instalador irá:
+   - Instalar/validar Node.js, Nginx e PostgreSQL.
+   - Criar/atualizar `.env` com `CORS_ORIGINS` e `VITE_BACKEND_URL` corretos.
+   - Buildar o frontend e publicar em `WEBROOT`.
+   - Configurar `systemd` para o backend (`chatnegocios.service`).
+   - Escrever configuração Nginx para frontend e API.
+   - Emitir certificados para os domínios informados (se SSL habilitado).
 
-Build das imagens
------------------
-- Backend:
-  - `docker build -t chatnegocios-backend:latest -f Dockerfile.backend .`
-- Frontend (injete a URL pública do backend):
-  - `docker build -t chatnegocios-frontend:latest -f Dockerfile.frontend --build-arg VITE_BACKEND_URL=https://<CHATNEGOCIOS_API_DOMAIN> .`
+Variáveis de ambiente
+---------------------
+- Backend
+  - `PORT` — porta do backend Express.
+  - `DATABASE_URL` — conexão Postgres.
+  - `CORS_ORIGINS` — origens permitidas (ex.: `https://app.seudominio.com`).
+- Frontend
+  - `VITE_BACKEND_URL` — URL pública do backend (ex.: `https://api.seudominio.com/api`).
+- Evolution API
+  - `VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY`
+  - `VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE`, `VITE_EVOLUTION_WEBHOOK_URL`
+- Atualização via UI (Admin)
+  - `ENABLE_UI_UPDATE`, `GITHUB_REPO`, `GITHUB_BRANCH`, `AUTO_RESTART_ON_UPDATE`
 
-Deploy
-------
-- Traefik:
-  - Compose: `docker compose -f scripts/traefik-compose.yml up -d`
-  - Swarm: `docker stack deploy -c scripts/traefik-compose.yml traefik`
-- Postgres (opcional):
-  - Compose: `docker compose -f scripts/postgres-compose.yml up -d`
-  - Swarm: `docker stack deploy -c scripts/postgres-compose.yml chatdb`
-- ChatNegócios (frontend + backend):
-  - Defina variáveis usadas nos labels do Traefik:
-    - PowerShell: `$env:CHATNEGOCIOS_DOMAIN="chatvendas.nowhats.com.br"; $env:CHATNEGOCIOS_API_DOMAIN="back.nowhats.com.br"`
-    - Bash: `export CHATNEGOCIOS_DOMAIN="chatvendas.nowhats.com.br"; export CHATNEGOCIOS_API_DOMAIN="back.nowhats.com.br"`
-  - Compose: `docker compose -f scripts/chatnegocios-compose.yml up -d`
-  - Swarm: `docker stack deploy -c scripts/chatnegocios-compose.yml chatnegocios`
-
-Variáveis de ambiente (serviços)
---------------------------------
-- Backend (`scripts/chatnegocios-compose.yml`):
-  - `DATABASE_URL` — conexão Postgres (ex.: `postgres://user:pass@host:5432/dbname`). Se ausente, usa banco em memória (pg-mem).
-  - `CORS_ORIGINS` — origens permitidas separadas por vírgula (ex.: `https://chatvendas.nowhats.com.br`).
-- Traefik (`scripts/traefik-compose.yml`):
-  - `ACME_EMAIL` — email para Let’s Encrypt.
-  - `CF_API_TOKEN` — token Cloudflare para DNS‑01.
-
-Validações rápidas
-------------------
-- Traefik: `docker logs traefik --since 5m` e verifique emissão de certificados.
-- Rotas TLS:
-  - Frontend: `https://<CHATNEGOCIOS_DOMAIN>`
-  - Backend: `https://<CHATNEGOCIOS_API_DOMAIN>`
-- Teste rápido: `curl -I https://<domínio>` deve retornar `HTTP/2 200` e certificado válido da Let’s Encrypt.
+Validação
+---------
+- Frontend: `https://<domínio-frontend>` deve carregar a aplicação.
+- Backend: `https://<domínio-backend>/api/auth/me` deve responder com JSON.
+- Nginx: `sudo nginx -t` e `sudo systemctl status nginx`.
+- Backend: `sudo systemctl status chatnegocios`.
 
 Troubleshooting
 ---------------
-- Certificados:
-  - Token inválido ou escopo incorreto na Cloudflare causa falha no desafio DNS.
-  - Verifique logs com `docker logs traefik --since 10m | findstr /i acme` (Windows) ou `grep -i acme` (Linux).
-- DNS:
-  - Confirme resolução: `dig +short <CHATNEGOCIOS_DOMAIN>` e `<CHATNEGOCIOS_API_DOMAIN>` apontando para o IP do servidor.
-- Frontend SPA:
-  - O Nginx do frontend já está com fallback SPA (`scripts/nginx.conf`).
+- DNS: confirme resolução dos domínios com `nslookup`/`dig` apontando para o IP do servidor.
+- Firewall: libere 80/443 (`sudo ufw allow 80,443/tcp`).
+- Certbot: verifique logs em `/var/log/letsencrypt/letsencrypt.log`.
+- Conflitos Nginx: remova site padrão (`/etc/nginx/sites-enabled/default`) se necessário.
 
 Notas
 -----
-- Evolution e instaladores foram removidos do projeto.
-- Para ambientes com Cloudflare proxy (nuvem laranja), DNS‑01 funciona normalmente.
-- Se preferir HTTP‑01, reconfigure Traefik (desabilite DNS‑01 e habilite httpchallenge, com porta 80 pública e proxy desligado temporariamente).
+- Arquivos e instruções de Docker/Traefik foram removidos.
+- Para deploy em containers, crie Dockerfiles e compose próprios conforme sua infraestrutura.

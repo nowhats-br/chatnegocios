@@ -1,6 +1,3 @@
-# Auto detect text files and perform LF normalization
+# Normaliza finais de linha e evita CRLF em scripts
 * text=auto
-bash git rm -r --cached
-bash git add
-bash git commit -m "feat: Initial project structure for EvoChat" 
-bash git push origin main --force
+*.sh text eol=lf

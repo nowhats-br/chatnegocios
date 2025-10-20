@@ -14,13 +14,16 @@ set -euo pipefail
 
 if [ "${EUID}" -ne 0 ]; then echo "[ERRO] Execute como root (sudo)."; exit 1; fi
 
-DOMAIN=""; ENABLE_SSL="false"; EMAIL=""; APP_DIR="$(pwd)"; WEBROOT="/var/www/chatnegocios/frontend"
+FRONTEND_DOMAIN=""; BACKEND_DOMAIN=""; ENABLE_SSL="false"; EMAIL=""; APP_DIR="$(pwd)"; WEBROOT="/var/www/chatnegocios/frontend"
 DB_USER="chat_user"; DB_PASS="chat_pass"; DB_NAME="chatnegocios"; DB_PORT="5433"
 BACKEND_PORT="3201"; NGINX_PORT="8080"; EVOLUTION_API_URL=""; EVOLUTION_API_KEY=""; EVO_INSTANCE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --domain) DOMAIN="$2"; shift 2;; --enable-ssl) ENABLE_SSL="true"; shift 1;; --email) EMAIL="$2"; shift 2;;
+    --domain) FRONTEND_DOMAIN="$2"; BACKEND_DOMAIN="$2"; shift 2;;
+    --frontend-domain) FRONTEND_DOMAIN="$2"; shift 2;;
+    --backend-domain) BACKEND_DOMAIN="$2"; shift 2;;
+    --enable-ssl) ENABLE_SSL="true"; shift 1;; --email) EMAIL="$2"; shift 2;;
     --app-dir) APP_DIR="$2"; shift 2;; --webroot) WEBROOT="$2"; shift 2;;
     --db-user) DB_USER="$2"; shift 2;; --db-pass) DB_PASS="$2"; shift 2;; --db-name) DB_NAME="$2"; shift 2;; --db-port) DB_PORT="$2"; shift 2;;
     --backend-port) BACKEND_PORT="$2"; shift 2;; --nginx-port) NGINX_PORT="$2"; shift 2;;
@@ -28,6 +31,12 @@ while [ $# -gt 0 ]; do
     *) echo "Argumento desconhecido: $1"; exit 1;;
   esac
 done
+
+# Prompts interativos se não fornecidos por argumentos
+if [ -z "$FRONTEND_DOMAIN" ]; then read -rp "Domínio do frontend (ex.: app.seudominio.com): " FRONTEND_DOMAIN; fi
+if [ -z "$BACKEND_DOMAIN" ]; then read -rp "Domínio do backend/API (ex.: api.seudominio.com): " BACKEND_DOMAIN; fi
+if [ "$ENABLE_SSL" != "true" ]; then read -rp "Habilitar SSL (Let's Encrypt)? [s/N]: " ANSW; ANSW=$(echo "${ANSW:-N}" | tr '[:upper:]' '[:lower:]'); { [ "$ANSW" = "s" ] || [ "$ANSW" = "y" ]; } && ENABLE_SSL="true"; fi
+if [ "$ENABLE_SSL" = "true" ] && [ -z "$EMAIL" ]; then read -rp "E-mail para Certbot (Let's Encrypt): " EMAIL; fi
 
 echo "[1/9] Pacotes"; apt-get update -y || true; apt-get install -y curl gnupg lsb-release jq nginx postgresql || true
 
@@ -54,13 +63,22 @@ create table if not exists contact_tags (contact_id int references contacts(id),
 SQL
 
 echo "[4/9] .env + build"; mkdir -p "$APP_DIR"
-if [ "$ENABLE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then APP_ORIGIN="https://${DOMAIN}"; else APP_ORIGIN="http://${DOMAIN:-localhost}:${NGINX_PORT}"; fi
-WEBHOOK_URL="${APP_ORIGIN}/api/whatsapp/webhook"; ENV_FILE="$APP_DIR/.env"
+# Origens separadas para frontend e backend
+if [ "$ENABLE_SSL" = "true" ]; then
+  [ -n "$FRONTEND_DOMAIN" ] && FRONTEND_ORIGIN="https://${FRONTEND_DOMAIN}"
+  [ -n "$BACKEND_DOMAIN" ] && BACKEND_ORIGIN="https://${BACKEND_DOMAIN}"
+else
+  FRONTEND_ORIGIN="http://${FRONTEND_DOMAIN:-localhost}:${NGINX_PORT}"
+  BACKEND_ORIGIN="http://${BACKEND_DOMAIN:-localhost}:${NGINX_PORT}"
+fi
+[ -z "${FRONTEND_ORIGIN:-}" ] && FRONTEND_ORIGIN="http://localhost:${NGINX_PORT}"
+[ -z "${BACKEND_ORIGIN:-}" ] && BACKEND_ORIGIN="http://localhost:${NGINX_PORT}"
+WEBHOOK_URL="${BACKEND_ORIGIN}/api/whatsapp/webhook"; ENV_FILE="$APP_DIR/.env"
 cat > "$ENV_FILE" <<EOF
 PORT=${BACKEND_PORT}
 DATABASE_URL=postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:${DB_PORT}/${DB_NAME}
-CORS_ORIGINS=${APP_ORIGIN}
-VITE_BACKEND_URL=${APP_ORIGIN}/api
+CORS_ORIGINS=${FRONTEND_ORIGIN},http://localhost:5173,http://localhost:5174
+VITE_BACKEND_URL=${BACKEND_ORIGIN}/api
 VITE_EVOLUTION_API_URL=${EVOLUTION_API_URL}
 VITE_EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
 VITE_EVOLUTION_WEBHOOK_URL=${WEBHOOK_URL}
@@ -89,20 +107,32 @@ systemctl daemon-reload || true; systemctl enable --now chatnegocios || true
 
 echo "[6/9] Nginx"
 NGCONF="/etc/nginx/sites-available/chatnegocios.conf"
-if [ "$ENABLE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then
+if [ "$ENABLE_SSL" = "true" ] && { [ -n "$FRONTEND_DOMAIN" ] || [ -n "$BACKEND_DOMAIN" ]; }; then
 cat > "$NGCONF" <<EOF
 map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
+# Frontend
 server {
-    listen 80; server_name ${DOMAIN}; root ${WEBROOT}; index index.html;
+    listen 80; server_name ${FRONTEND_DOMAIN}; root ${WEBROOT}; index index.html;
     location / { try_files \$uri \$uri/ /index.html; }
+    gzip on; gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; gzip_min_length 1024;
+}
+# Backend API
+server {
+    listen 80; server_name ${BACKEND_DOMAIN};
     location /api/whatsapp/ { proxy_pass http://127.0.0.1:${BACKEND_PORT}; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \$connection_upgrade; proxy_read_timeout 60s; }
     location /api/ { proxy_pass http://127.0.0.1:${BACKEND_PORT}/; proxy_http_version 1.1; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \$connection_upgrade; proxy_read_timeout 60s; }
-    gzip on; gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; gzip_min_length 1024;
 }
 EOF
 ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf; nginx -t || true; systemctl restart nginx || true
 apt-get install -y certbot python3-certbot-nginx || true
-[ -n "$EMAIL" ] && certbot --nginx -n --agree-tos -m "$EMAIL" -d "$DOMAIN" || echo "[AVISO] SSL habilitado sem --email; execute certbot manualmente"
+DOMS=()
+[ -n "$FRONTEND_DOMAIN" ] && DOMS+=(-d "$FRONTEND_DOMAIN")
+[ -n "$BACKEND_DOMAIN" ] && [ "$BACKEND_DOMAIN" != "$FRONTEND_DOMAIN" ] && DOMS+=(-d "$BACKEND_DOMAIN")
+if [ -n "$EMAIL" ] && [ ${#DOMS[@]} -gt 0 ]; then
+  certbot --nginx -n --agree-tos -m "$EMAIL" "${DOMS[@]}" || echo "[AVISO] Falha ao obter SSL; verifique DNS/porta 80/liberação firewall"
+else
+  echo "[AVISO] SSL habilitado sem e-mail/domínios; execute certbot manualmente"
+fi
 else
 cat > "$NGCONF" <<EOF
 map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
