@@ -263,6 +263,12 @@ if [[ "$EV_HEALTH_OK" != true ]]; then
 fi
 if [[ "$EV_HEALTH_OK" != true ]]; then
   log "Aviso: Evolution ainda não respondeu; Nginx pode retornar 502 até estabilizar."
+  log "Diagnóstico: status do container Evolution"
+  docker ps -a --format '{{.Names}} {{.Status}} {{.Ports}}' | sed -n '/^evolution/p'
+  log "Logs (últimas 200 linhas) do Evolution"
+  docker logs --tail=200 evolution || true
+  log "Mapeamentos de porta em uso (${EVOLUTION_PORT})"
+  ss -tulpen | awk -v p=":${EVOLUTION_PORT}" '$5 ~ p {print $0}' || true
 fi
 
 # ChatNegócios Backend na porta 3003 como serviço systemd
