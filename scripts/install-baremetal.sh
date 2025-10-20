@@ -18,6 +18,7 @@ FRONTEND_DOMAIN=""; BACKEND_DOMAIN=""; ENABLE_SSL="false"; EMAIL=""; APP_DIR="$(
 DB_USER="chat_user"; DB_PASS="chat_pass"; DB_NAME="chatnegocios"; DB_PORT="5433"
 BACKEND_PORT="3201"; NGINX_PORT="8080"; EVOLUTION_API_URL=""; EVOLUTION_API_KEY=""; EVO_INSTANCE=""
 ACME_MODE="http"; CF_API_TOKEN=""
+REINSTALL_NGINX="false"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,6 +30,7 @@ while [ $# -gt 0 ]; do
     --db-user) DB_USER="$2"; shift 2;; --db-pass) DB_PASS="$2"; shift 2;; --db-name) DB_NAME="$2"; shift 2;; --db-port) DB_PORT="$2"; shift 2;;
     --backend-port) BACKEND_PORT="$2"; shift 2;; --nginx-port) NGINX_PORT="$2"; shift 2;;
     --dns-cloudflare-token) CF_API_TOKEN="$2"; shift 2;;
+    --reinstall-nginx) REINSTALL_NGINX="true"; shift 1;;
     --evo-url) EVOLUTION_API_URL="$2"; shift 2;; --evo-key) EVOLUTION_API_KEY="$2"; shift 2;; --evo-instance) EVO_INSTANCE="$2"; shift 2;;
     *) echo "Argumento desconhecido: $1"; exit 1;;
   esac
@@ -41,6 +43,11 @@ if [ "$ENABLE_SSL" != "true" ]; then read -rp "Habilitar SSL (Let's Encrypt)? [s
 if [ "$ENABLE_SSL" = "true" ] && [ -z "$EMAIL" ]; then read -rp "E-mail para Certbot (Let's Encrypt): " EMAIL; fi
 
 echo "[1/9] Pacotes"; apt-get update -y || true; apt-get install -y curl gnupg lsb-release jq nginx postgresql || true
+if [ "$REINSTALL_NGINX" = "true" ]; then
+  echo "[1/9] Reinstalando Nginx (purge + install)"; systemctl stop nginx || true
+  apt-get remove --purge -y nginx nginx-common nginx-full || true
+  apt-get install -y nginx || true
+fi
 
 echo "[2/9] Node 20+"; CURRENT_MAJOR=$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0)
 if [ "$CURRENT_MAJOR" -lt 20 ]; then curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; apt-get install -y nodejs || true; fi
