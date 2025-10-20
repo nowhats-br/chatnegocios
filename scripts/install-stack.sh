@@ -16,6 +16,8 @@ set -euo pipefail
 #     --chat-port 8081 --evolution-port 8080 --nginx-ssl-port 8443 \
 #     --chat-app-dir /opt/chatnegocios --chat-webroot /var/www/chatnegocios/frontend \
 #     --cf-propagation-seconds 120 \
+#     --evolution-api-key "evo-api-key" \
+#     --force-reinstall-evolution \
 #     --install-portainer
 #
 # Após rodar, acesse:
@@ -43,6 +45,9 @@ CHAT_WEBROOT="/var/www/chatnegocios/frontend"
 INSTALL_PORTAINER=false
 CF_PROPAGATION_SECONDS=120
 
+EVOLUTION_API_KEY=""
+FORCE_REINSTALL_EVOLUTION=false
+
 # Parse argumentos simples
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,6 +63,8 @@ while [[ $# -gt 0 ]]; do
     --chat-webroot) CHAT_WEBROOT="$2"; shift 2;;
     --cf-propagation-seconds) CF_PROPAGATION_SECONDS="$2"; shift 2;;
     --install-portainer) INSTALL_PORTAINER=true; shift;;
+    --evolution-api-key) EVOLUTION_API_KEY="$2"; shift 2;;
+    --force-reinstall-evolution) FORCE_REINSTALL_EVOLUTION=true; shift;;
     *) echo "Argumento desconhecido: $1"; exit 1;;
   esac
 done
@@ -122,9 +129,9 @@ if [[ "$INSTALL_PORTAINER" == true ]]; then
   log "Instalando/atualizando Portainer"
   docker volume create portainer_data >/dev/null 2>&1 || true
   docker pull portainer/portainer-ce:latest >/dev/null 2>&1 || true
+  LATEST_ID=$(docker image inspect -f '{{.Id}}' portainer/portainer-ce:latest || true)
   if docker ps -a --format '{{.Names}}' | grep -q '^portainer$'; then
     CURRENT_ID=$(docker inspect -f '{{.Image}}' portainer || true)
-    LATEST_ID=$(docker image inspect -f '{{.Id}}' portainer/portainer-ce:latest || true)
     if [[ "$CURRENT_ID" != "$LATEST_ID" ]] || ! docker ps --format '{{.Names}}' | grep -q '^portainer$'; then
       log "Atualizando Portainer para latest"
       docker rm -f portainer >/dev/null 2>&1 || true
@@ -149,6 +156,19 @@ fi
 
 # Diretórios das apps
 mkdir -p /opt/evolution /opt/chatnegocios "$CHAT_WEBROOT"
+
+# Evolution: gerar/usar API key automaticamente se não fornecida
+if [[ -z "${EVOLUTION_API_KEY:-}" ]]; then
+  if [[ -f /opt/evolution/api.key ]]; then
+    EVOLUTION_API_KEY=$(cat /opt/evolution/api.key)
+    log "Usando API key Evolution existente em /opt/evolution/api.key"
+  else
+    EVOLUTION_API_KEY=$(openssl rand -hex 24)
+    echo "$EVOLUTION_API_KEY" > /opt/evolution/api.key
+    chmod 600 /opt/evolution/api.key
+    log "Gerada API key Evolution e salva em /opt/evolution/api.key"
+  fi
+fi
 
 # Evolution via Docker na porta ${EVOLUTION_PORT}
 if is_port_busy "$EVOLUTION_PORT"; then
@@ -178,7 +198,7 @@ else
 fi
 
 log "Subindo Evolution na porta ${EVOLUTION_PORT}"
-cat > /opt/evolution/docker-compose.yml <<'YAML'
+cat > /opt/evolution/docker-compose.yml <<YAML
 version: "3.9"
 services:
   evolution:
@@ -189,10 +209,13 @@ services:
       - "8080:8080"
     environment:
       - LOG_LEVEL=info
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
     volumes:
-      - evolution_data:/evolution/instances
+      - evolution_store:/evolution/store
+      - evolution_instances:/evolution/instances
 volumes:
-  evolution_data:
+  evolution_store:
+  evolution_instances:
 YAML
 
 # Se a imagem local foi construída, usa ela no compose
@@ -205,7 +228,42 @@ if [[ "$EVOLUTION_PORT" != "8080" ]]; then
   sed -i "s/\"8080:8080\"/\"${EVOLUTION_PORT}:8080\"/" /opt/evolution/docker-compose.yml
 fi
 
+# Remove container existente se for requisitado forçar reinstalação
+if docker ps -a --format '{{.Names}}' | grep -q '^evolution$'; then
+  if [[ "$FORCE_REINSTALL_EVOLUTION" == true ]]; then
+    log "Forçando reinstalação do Evolution: removendo container existente"
+    docker rm -f evolution || true
+  fi
+fi
+
 ( cd /opt/evolution && docker compose up -d )
+
+# Checagem de saúde do Evolution
+log "Verificando saúde do Evolution em http://127.0.0.1:${EVOLUTION_PORT}"
+EV_RETRY_END=$(( $(date +%s) + 60 ))
+EV_HEALTH_OK=false
+while [[ $(date +%s) -lt "$EV_RETRY_END" ]]; do
+  if curl -sS -m 3 "http://127.0.0.1:${EVOLUTION_PORT}/" | grep -q "Evolution API"; then
+    EV_HEALTH_OK=true
+    break
+  fi
+  sleep 3
+done
+if [[ "$EV_HEALTH_OK" != true ]]; then
+  log "Evolution não respondeu como esperado; reiniciando container e aguardando mais 30s"
+  docker compose -f /opt/evolution/docker-compose.yml restart evolution || true
+  EV_RETRY_END=$(( $(date +%s) + 30 ))
+  while [[ $(date +%s) -lt "$EV_RETRY_END" ]]; do
+    if curl -sS -m 3 "http://127.0.0.1:${EVOLUTION_PORT}/" | grep -q "Evolution API"; then
+      EV_HEALTH_OK=true
+      break
+    fi
+    sleep 3
+  done
+fi
+if [[ "$EV_HEALTH_OK" != true ]]; then
+  log "Aviso: Evolution ainda não respondeu; Nginx pode retornar 502 até estabilizar."
+fi
 
 # ChatNegócios Backend na porta 3003 como serviço systemd
 log "Configurando ChatNegócios backend na porta ${CHAT_PORT}"
@@ -239,6 +297,7 @@ Type=simple
 WorkingDirectory=${CHAT_APP_DIR}/server
 Environment=PORT=${CHAT_PORT}
 Environment=NODE_ENV=production
+Environment=CORS_ORIGINS=https://${CHAT_FRONTEND_DOMAIN}:${NGINX_SSL_PORT},https://${CHAT_FRONTEND_DOMAIN}
 ExecStart=/usr/bin/node ${CHAT_APP_DIR}/server/app.cjs
 Restart=always
 RestartSec=5
@@ -273,7 +332,7 @@ fi
 if [[ -d "${CHAT_APP_DIR}" ]]; then
   log "Construindo frontend (se projeto presente)"
   if [[ -f "${CHAT_APP_DIR}/package.json" ]]; then
-    ( cd "${CHAT_APP_DIR}" && npm ci && npm run build ) || true
+    ( cd "${CHAT_APP_DIR}" && npm ci && VITE_BACKEND_URL="https://${CHAT_BACKEND_DOMAIN}:${NGINX_SSL_PORT}" npm run build ) || true
     if [[ -d "${CHAT_APP_DIR}/dist" ]]; then
       rsync -a --delete "${CHAT_APP_DIR}/dist/" "${CHAT_WEBROOT}/"
     fi
@@ -449,3 +508,11 @@ systemctl restart nginx
 systemctl status nginx --no-pager -l || true
 
 log "Concluído com sucesso. Acesse seus serviços em HTTPS na porta ${NGINX_SSL_PORT}."
+log "Evolution API URL: https://${EVOLUTION_DOMAIN}:${NGINX_SSL_PORT}"
+log "Evolution API key salva em: /opt/evolution/api.key"
+
+# Verifica que o backend responde na porta configurada
+HTTP_CODE=$(curl -s -o /dev/null -m 3 -w "%{http_code}" "http://127.0.0.1:${CHAT_PORT}/" || true)
+if [[ -n "$HTTP_CODE" ]]; then
+  log "Backend respondeu na raiz com HTTP ${HTTP_CODE}; 404 na raiz é normal para API."
+fi
