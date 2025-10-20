@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Novo instalador de excelência: Evolution (porta 80), ChatNegócios (porta 3003),
-# Nginx com SSL em 8081, Portainer e estruturas isoladas.
+# Novo instalador de excelência: Evolution (porta 8080), ChatNegócios (porta 8081),
+# Nginx com SSL em 8443, Portainer e estruturas isoladas.
 # Requisitos: Ubuntu/Debian server com sudo, domínios apontando para o servidor
 # e token Cloudflare com permissão DNS (Edit Zone).
 
@@ -13,14 +13,14 @@ set -euo pipefail
 #     --chat-backend-domain api.seudominio.com \
 #     --email admin@seudominio.com \
 #     --dns-cloudflare-token "<TOKEN_CF>" \
-#     --chat-port 3003 --evolution-port 80 --nginx-ssl-port 8081 \
+#     --chat-port 8081 --evolution-port 8080 --nginx-ssl-port 8443 \
 #     --chat-app-dir /opt/chatnegocios --chat-webroot /var/www/chatnegocios/frontend \
 #     --install-portainer
 #
 # Após rodar, acesse:
-#   - Evolution: https://evolution.seudominio.com:8081
-#   - Frontend: https://app.seudominio.com:8081
-#   - Backend:  https://api.seudominio.com:8081
+#   - Evolution: https://evolution.seudominio.com:8443
+#   - Frontend: https://app.seudominio.com:8443
+#   - Backend:  https://api.seudominio.com:8443
 # Para Cloudflare Proxied (nuvem laranja), mude o nginx-ssl-port para 443 e
 # garanta que 443 esteja livre.
 
@@ -34,9 +34,9 @@ CHAT_FRONTEND_DOMAIN=""
 CHAT_BACKEND_DOMAIN=""
 EMAIL=""
 CF_TOKEN=""
-CHAT_PORT=3003
-EVOLUTION_PORT=80
-NGINX_SSL_PORT=8081
+CHAT_PORT=8081
+EVOLUTION_PORT=8080
+NGINX_SSL_PORT=8443
 CHAT_APP_DIR="/opt/chatnegocios"
 CHAT_WEBROOT="/var/www/chatnegocios/frontend"
 INSTALL_PORTAINER=false
