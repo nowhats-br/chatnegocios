@@ -82,11 +82,21 @@ log() { echo "[install] $*"; }
 log "Atualizando pacotes e instalando dependências básicas"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release jq nginx certbot python3-certbot-dns-cloudflare rsync git
+apt-get install -y ca-certificates curl gnupg lsb-release jq nginx certbot python3-certbot-dns-cloudflare rsync git openssl
 
-# Instalar Node.js LTS (v20) para backend ChatNegócios
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
+# Instalar Node.js LTS (v22) para backend ChatNegócios
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJ=$(node -v | sed 's/^v\([0-9]\+\).*/\1/')
+  if [[ "$NODE_MAJ" -lt 22 ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+  else
+    log "Node.js já presente (v$(node -v)); mantendo."
+  fi
+else
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
 
 # Purga sites padrão do Nginx e garante diretórios
 rm -f /etc/nginx/sites-enabled/default || true
@@ -105,15 +115,32 @@ fi
 
 # Instala Portainer (opcional)
 if [[ "$INSTALL_PORTAINER" == true ]]; then
-  log "Instalando Portainer"
+  log "Instalando/atualizando Portainer"
   docker volume create portainer_data >/dev/null 2>&1 || true
-  docker rm -f portainer >/dev/null 2>&1 || true
-  docker run -d \
-    -p 8000:8000 -p 9443:9443 -p 9000:9000 \
-    --name portainer --restart=always \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v portainer_data:/data \
-    portainer/portainer-ce:latest
+  docker pull portainer/portainer-ce:latest >/dev/null 2>&1 || true
+  if docker ps -a --format '{{.Names}}' | grep -q '^portainer$'; then
+    CURRENT_ID=$(docker inspect -f '{{.Image}}' portainer || true)
+    LATEST_ID=$(docker image inspect -f '{{.Id}}' portainer/portainer-ce:latest || true)
+    if [[ "$CURRENT_ID" != "$LATEST_ID" ]] || ! docker ps --format '{{.Names}}' | grep -q '^portainer$'; then
+      log "Atualizando Portainer para latest"
+      docker rm -f portainer >/dev/null 2>&1 || true
+      docker run -d \
+        -p 8000:8000 -p 9443:9443 -p 9000:9000 \
+        --name portainer --restart=always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:latest
+    else
+      log "Portainer já instalado e atualizado; pulando."
+    fi
+  else
+    docker run -d \
+      -p 8000:8000 -p 9443:9443 -p 9000:9000 \
+      --name portainer --restart=always \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v portainer_data:/data \
+      portainer/portainer-ce:latest
+  fi
 fi
 
 # Diretórios das apps
@@ -121,8 +148,12 @@ mkdir -p /opt/evolution /opt/chatnegocios "$CHAT_WEBROOT"
 
 # Evolution via Docker na porta ${EVOLUTION_PORT}
 if is_port_busy "$EVOLUTION_PORT"; then
-  echo "A porta ${EVOLUTION_PORT} já está em uso. Libere-a ou altere --evolution-port." >&2
-  exit 1
+  if docker ps --format '{{.Names}} {{.Ports}}' | grep -qE '^evolution\s+.*:${EVOLUTION_PORT}->8080'; then
+    log "Evolution já ativo na porta ${EVOLUTION_PORT}; continuando."
+  else
+    echo "A porta ${EVOLUTION_PORT} está em uso por outro processo. Altere --evolution-port." >&2
+    exit 1
+  fi
 fi
 
 # Tenta puxar imagem pública v2.3.4; se falhar, faz build local
@@ -182,7 +213,19 @@ if [[ ! -f "${CHAT_APP_DIR}/server/app.cjs" ]]; then
   exit 1
 fi
 
-cat > /etc/systemd/system/chatnegocios.service <<SERVICE
+# Se porta ocupada, permite se o serviço já estiver ativo
+if is_port_busy "$CHAT_PORT"; then
+  if systemctl is-active --quiet chatnegocios.service; then
+    log "ChatNegócios já ativo na porta ${CHAT_PORT}; mantendo."
+  else
+    echo "A porta ${CHAT_PORT} está em uso por outro processo. Altere --chat-port." >&2
+    exit 1
+  fi
+fi
+
+# Gerar arquivo de serviço apenas se mudou
+TMP_SERVICE=/tmp/chatnegocios.service.new
+cat > "$TMP_SERVICE" <<SERVICE
 [Unit]
 Description=ChatNegócios Backend
 After=network.target
@@ -201,9 +244,26 @@ User=root
 WantedBy=multi-user.target
 SERVICE
 
-systemctl daemon-reload
+NEEDS_UPDATE=true
+if [[ -f /etc/systemd/system/chatnegocios.service ]]; then
+  if diff -q "$TMP_SERVICE" /etc/systemd/system/chatnegocios.service >/dev/null 2>&1; then
+    NEEDS_UPDATE=false
+  fi
+fi
+
+if [[ "$NEEDS_UPDATE" == true ]]; then
+  mv "$TMP_SERVICE" /etc/systemd/system/chatnegocios.service
+  systemctl daemon-reload
+else
+  rm -f "$TMP_SERVICE"
+fi
+
 systemctl enable chatnegocios.service
-systemctl restart chatnegocios.service || (journalctl -u chatnegocios.service -n 200 --no-pager; exit 1)
+if systemctl is-active --quiet chatnegocios.service; then
+  systemctl restart chatnegocios.service || (journalctl -u chatnegocios.service -n 200 --no-pager; exit 1)
+else
+  systemctl start chatnegocios.service || (journalctl -u chatnegocios.service -n 200 --no-pager; exit 1)
+fi
 
 # Frontend build (se aplicável):
 if [[ -d "${CHAT_APP_DIR}" ]]; then
@@ -230,17 +290,33 @@ for d in "${ALL_DOMAINS[@]}"; do
   CERT_ARGS+=( -d "$d" )
 done
 
-certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$CF_INI" \
-  -m "$EMAIL" -n --agree-tos "${CERT_ARGS[@]}"
-
 PRIMARY_DIR="/etc/letsencrypt/live/${EVOLUTION_DOMAIN}"
+FULLCHAIN="$PRIMARY_DIR/fullchain.pem"
+PRIVKEY="$PRIMARY_DIR/privkey.pem"
+
+SHOULD_ISSUE=true
+if [[ -f "$FULLCHAIN" ]]; then
+  END_DATE=$(openssl x509 -enddate -noout -in "$FULLCHAIN" | cut -d= -f2 || true)
+  if [[ -n "$END_DATE" ]]; then
+    END_EPOCH=$(date -d "$END_DATE" +%s)
+    NOW_EPOCH=$(date +%s)
+    REMAIN_DAYS=$(( (END_EPOCH - NOW_EPOCH) / 86400 ))
+    if [[ "$REMAIN_DAYS" -gt 30 ]]; then
+      log "Certificado existente válido por ${REMAIN_DAYS} dias; pulando emissão."
+      SHOULD_ISSUE=false
+    fi
+  fi
+fi
+
+if [[ "$SHOULD_ISSUE" == true ]]; then
+  certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$CF_INI" \
+    -m "$EMAIL" -n --agree-tos "${CERT_ARGS[@]}"
+fi
+
 if [[ ! -d "$PRIMARY_DIR" ]]; then
   echo "Diretório de certificado não encontrado: $PRIMARY_DIR" >&2
   exit 1
 fi
-
-FULLCHAIN="$PRIMARY_DIR/fullchain.pem"
-PRIVKEY="$PRIMARY_DIR/privkey.pem"
 
 # Nginx conf com SSL na porta customizada e proxy
 log "Gerando configuração Nginx (SSL na porta ${NGINX_SSL_PORT})"
