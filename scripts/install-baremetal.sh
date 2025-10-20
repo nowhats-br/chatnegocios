@@ -73,6 +73,7 @@ else
 fi
 [ -z "${FRONTEND_ORIGIN:-}" ] && FRONTEND_ORIGIN="http://localhost:${NGINX_PORT}"
 [ -z "${BACKEND_ORIGIN:-}" ] && BACKEND_ORIGIN="http://localhost:${NGINX_PORT}"
+APP_ORIGIN="${FRONTEND_ORIGIN}"
 WEBHOOK_URL="${BACKEND_ORIGIN}/api/whatsapp/webhook"; ENV_FILE="$APP_DIR/.env"
 cat > "$ENV_FILE" <<EOF
 PORT=${BACKEND_PORT}
@@ -108,33 +109,107 @@ systemctl daemon-reload || true; systemctl enable --now chatnegocios || true
 echo "[6/9] Nginx"
 NGCONF="/etc/nginx/sites-available/chatnegocios.conf"
 if [ "$ENABLE_SSL" = "true" ] && { [ -n "$FRONTEND_DOMAIN" ] || [ -n "$BACKEND_DOMAIN" ]; }; then
-cat > "$NGCONF" <<EOF
+  if [ -n "$BACKEND_DOMAIN" ] && [ "$BACKEND_DOMAIN" != "$FRONTEND_DOMAIN" ]; then
+    # Dois domínios distintos: um para frontend e outro para API
+    cat > "$NGCONF" <<EOF
 map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
-# Frontend
 server {
-    listen 80; server_name ${FRONTEND_DOMAIN}; root ${WEBROOT}; index index.html;
-    location / { try_files \$uri \$uri/ /index.html; }
-    gzip on; gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; gzip_min_length 1024;
+    listen 80;
+    server_name ${FRONTEND_DOMAIN};
+    root ${WEBROOT};
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length 1024;
 }
-# Backend API
 server {
-    listen 80; server_name ${BACKEND_DOMAIN};
-    location /api/whatsapp/ { proxy_pass http://127.0.0.1:${BACKEND_PORT}; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \$connection_upgrade; proxy_read_timeout 60s; }
-    location /api/ { proxy_pass http://127.0.0.1:${BACKEND_PORT}/; proxy_http_version 1.1; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \$connection_upgrade; proxy_read_timeout 60s; }
+    listen 80;
+    server_name ${BACKEND_DOMAIN};
+
+    location /api/whatsapp/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 60s;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 60s;
+    }
 }
 EOF
-ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf; nginx -t || true; systemctl restart nginx || true
-apt-get install -y certbot python3-certbot-nginx || true
-DOMS=()
-[ -n "$FRONTEND_DOMAIN" ] && DOMS+=(-d "$FRONTEND_DOMAIN")
-[ -n "$BACKEND_DOMAIN" ] && [ "$BACKEND_DOMAIN" != "$FRONTEND_DOMAIN" ] && DOMS+=(-d "$BACKEND_DOMAIN")
-if [ -n "$EMAIL" ] && [ ${#DOMS[@]} -gt 0 ]; then
-  certbot --nginx -n --agree-tos -m "$EMAIL" "${DOMS[@]}" || echo "[AVISO] Falha ao obter SSL; verifique DNS/porta 80/liberação firewall"
+    DOMS=( -d "$FRONTEND_DOMAIN" -d "$BACKEND_DOMAIN" )
+  else
+    # Um único domínio: frontend e API no mesmo host
+    cat > "$NGCONF" <<EOF
+map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
+server {
+    listen 80;
+    server_name ${FRONTEND_DOMAIN};
+    root ${WEBROOT};
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    location /api/whatsapp/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 60s;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 60s;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length 1024;
+}
+EOF
+    DOMS=( -d "$FRONTEND_DOMAIN" )
+  fi
+  ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf
+  rm -f /etc/nginx/sites-enabled/default || true
+  nginx -t || true; systemctl restart nginx || true
+  apt-get install -y certbot python3-certbot-nginx || true
+  if [ -n "$EMAIL" ] && [ ${#DOMS[@]} -gt 0 ]; then
+    certbot --nginx -n --agree-tos -m "$EMAIL" "${DOMS[@]}" || echo "[AVISO] Falha ao obter SSL; verifique DNS/porta 80/liberação firewall"
+    systemctl reload nginx || true
+  else
+    echo "[AVISO] SSL habilitado sem e-mail/domínios; execute certbot manualmente"
+  fi
 else
-  echo "[AVISO] SSL habilitado sem e-mail/domínios; execute certbot manualmente"
-fi
-else
-cat > "$NGCONF" <<EOF
+  cat > "$NGCONF" <<EOF
 map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
 server {
     listen ${NGINX_PORT}; server_name _; root ${WEBROOT}; index index.html;
@@ -144,7 +219,9 @@ server {
     gzip on; gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; gzip_min_length 1024;
 }
 EOF
-ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf; nginx -t || true; systemctl restart nginx || true
+  ln -sf "$NGCONF" /etc/nginx/sites-enabled/chatnegocios.conf
+  rm -f /etc/nginx/sites-enabled/default || true
+  nginx -t || true; systemctl restart nginx || true
 fi
 
 echo "[7/9] Evolution API"
