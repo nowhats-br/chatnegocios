@@ -165,4 +165,12 @@ export const dbClient = {
       });
     },
   },
+  system: {
+    async updateCheck() {
+      return await http<{ available: boolean; currentSha: string; latestSha: string; latestMessage: string; latestDate: string; branch: string }>(`/system/update/check`);
+    },
+    async updateApply() {
+      return await http<{ ok: boolean; requiresRestart: boolean }>(`/system/update/apply`, { method: 'POST' });
+    },
+  },
 };

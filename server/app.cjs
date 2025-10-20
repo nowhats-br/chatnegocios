@@ -495,3 +495,75 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
 });
+// System update check/apply endpoints
+app.get('/system/update/check', async (_req, res) => {
+  try {
+    if (process.env.ENABLE_UI_UPDATE !== 'true') {
+      return res.status(403).json({ error: 'Atualização via UI desabilitada' });
+    }
+    const repo = process.env.GITHUB_REPO;
+    const branch = process.env.GITHUB_BRANCH || 'main';
+    if (!repo) {
+      return res.status(400).json({ error: 'GITHUB_REPO não configurado' });
+    }
+    const ghResp = await fetch(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(branch)}`, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'chatnegocios-app'
+      }
+    });
+    if (!ghResp.ok) {
+      const text = await ghResp.text();
+      return res.status(502).json({ error: `Falha ao consultar GitHub: ${text}` });
+    }
+    const ghJson = await ghResp.json();
+    const latestSha = ghJson?.sha || '';
+    const latestMessage = ghJson?.commit?.message || '';
+    const latestDate = ghJson?.commit?.author?.date || '';
+    const { exec } = require('child_process');
+    const currentSha = await new Promise((resolve) => {
+      exec('git rev-parse HEAD', { cwd: process.cwd() }, (err, stdout) => {
+        if (err) return resolve('');
+        resolve(String(stdout).trim());
+      });
+    });
+    const available = !!latestSha && !!currentSha && latestSha !== currentSha;
+    res.json({ available, currentSha, latestSha, latestMessage, latestDate, branch });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/system/update/apply', async (_req, res) => {
+  try {
+    if (process.env.ENABLE_UI_UPDATE !== 'true') {
+      return res.status(403).json({ error: 'Atualização via UI desabilitada' });
+    }
+    const branch = process.env.GITHUB_BRANCH || 'main';
+    const cmds = [
+      'git fetch --all',
+      `git reset --hard origin/${branch}`,
+      'npm install',
+      'npm run build'
+    ];
+    const { exec } = require('child_process');
+    for (const cmd of cmds) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve, reject) => {
+        exec(cmd, { cwd: process.cwd() }, (err, stdout, stderr) => {
+          if (err) return reject(new Error(stderr || err.message));
+          resolve(stdout);
+        });
+      });
+    }
+    const autoRestart = process.env.AUTO_RESTART_ON_UPDATE === 'true';
+    if (autoRestart) {
+      setTimeout(() => {
+        process.exit(0);
+      }, 500);
+    }
+    res.json({ ok: true, requiresRestart: !autoRestart });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
