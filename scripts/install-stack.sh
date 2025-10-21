@@ -13,6 +13,9 @@ set -euo pipefail
 #     --chat-backend-domain api.seudominio.com \
 #     --email admin@seudominio.com \
 #     --dns-cloudflare-token "<TOKEN_CF>" \
+#     # ou use o formato com igual:
+#     # --dns-cloudflare-token=<TOKEN_CF> \
+
 #     --chat-port 8081 --evolution-port 8080 --nginx-ssl-port 8443 \
 #     --chat-app-dir /opt/chatnegocios --chat-webroot /var/www/chatnegocios/frontend \
 #     --cf-propagation-seconds 120 \
@@ -48,9 +51,31 @@ CF_PROPAGATION_SECONDS=120
 EVOLUTION_API_KEY=""
 FORCE_REINSTALL_EVOLUTION=false
 
-# Parse argumentos simples
+# Parse argumentos (suporta --flag=valor e --flag valor)
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --*=*)
+      KEY="${1%%=*}"
+      VAL="${1#*=}"
+      case "$KEY" in
+        --evolution-domain) EVOLUTION_DOMAIN="$VAL";;
+        --chat-frontend-domain) CHAT_FRONTEND_DOMAIN="$VAL";;
+        --chat-backend-domain) CHAT_BACKEND_DOMAIN="$VAL";;
+        --email) EMAIL="$VAL";;
+        --dns-cloudflare-token) CF_TOKEN="$VAL";;
+        --chat-port) CHAT_PORT="$VAL";;
+        --evolution-port) EVOLUTION_PORT="$VAL";;
+        --nginx-ssl-port) NGINX_SSL_PORT="$VAL";;
+        --chat-app-dir) CHAT_APP_DIR="$VAL";;
+        --chat-webroot) CHAT_WEBROOT="$VAL";;
+        --cf-propagation-seconds) CF_PROPAGATION_SECONDS="$VAL";;
+        --evolution-api-key) EVOLUTION_API_KEY="$VAL";;
+        --force-reinstall-evolution) FORCE_REINSTALL_EVOLUTION=true;;
+        --install-portainer) INSTALL_PORTAINER=true;;
+        *) echo "Argumento desconhecido: $1"; exit 1;;
+      esac
+      shift
+      ;;
     --evolution-domain) EVOLUTION_DOMAIN="$2"; shift 2;;
     --chat-frontend-domain) CHAT_FRONTEND_DOMAIN="$2"; shift 2;;
     --chat-backend-domain) CHAT_BACKEND_DOMAIN="$2"; shift 2;;
