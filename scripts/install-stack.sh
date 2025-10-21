@@ -106,6 +106,28 @@ if [[ "${MISSING:-false}" == true ]]; then
   exit 1
 fi
 
+# Checagem de DNS: confirmar que domínios apontam para este servidor
+resolve_ip() {
+  local DOMAIN="$1"
+  local IP=""
+  IP=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -n 1)
+  if [[ -z "$IP" ]]; then
+    IP=$(dig +short "$DOMAIN" 2>/dev/null | head -n 1 || true)
+  fi
+  echo "$IP"
+}
+SERVER_IP=$(curl -s https://api.ipify.org || curl -s ifconfig.me || true)
+for d in "$EVOLUTION_DOMAIN" "$CHAT_FRONTEND_DOMAIN" "$CHAT_BACKEND_DOMAIN"; do
+  RESOLVED=$(resolve_ip "$d")
+  if [[ -z "$RESOLVED" ]]; then
+    echo "[install] Aviso: domínio $d não resolve em DNS ainda. Configure o A/AAAA no Cloudflare." >&2
+  elif [[ -n "$SERVER_IP" && "$RESOLVED" != "$SERVER_IP" ]]; then
+    echo "[install] Aviso: $d resolve para $RESOLVED, mas o servidor é $SERVER_IP. Acesso externo pode falhar até ajustar DNS." >&2
+  else
+    echo "[install] DNS OK: $d aponta para $RESOLVED." >&2
+  fi
+done
+
 # Helper: checa se porta está em uso
 is_port_busy() {
   local PORT="$1"
