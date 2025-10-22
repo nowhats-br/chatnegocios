@@ -25,14 +25,13 @@ const Login: React.FC = () => {
         localStorage.setItem('auth_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
       } else {
-        // Fluxo simples: simula cadastro e volta ao login
-        const { token, user } = await dbClient.auth.login(email, password);
+        const { token, user } = await dbClient.auth.register(email, password);
         localStorage.setItem('auth_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
         toast.success('Cadastro realizado!', {
-          description: 'Conta criada para uso de desenvolvimento.',
+          description: 'Sua conta foi criada com sucesso.',
         });
-        setMode('signIn');
+        navigate('/');
       }
       
       if (mode === 'signIn') {

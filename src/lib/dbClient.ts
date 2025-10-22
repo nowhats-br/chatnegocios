@@ -1,11 +1,13 @@
 const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:3001';
 
 async function http<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -23,6 +25,12 @@ export const dbClient = {
   auth: {
     async login(email: string, password: string) {
       return await http<{ token: string; user: { id: string; email: string } }>(`/auth/login`, {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+    },
+    async register(email: string, password: string) {
+      return await http<{ token: string; user: { id: string; email: string } }>(`/auth/register`, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });

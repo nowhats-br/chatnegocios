@@ -131,21 +131,118 @@ const asyncQuery = async (text, params) => {
   }
 };
 
-// Auth (simple demo)
+// Auth (registro, login e tokens reais)
+const crypto = require('crypto');
+
+async function ensureAuthSchema() {
+  await asyncQuery('create table if not exists users (id text primary key, email text unique not null, password_hash text not null, created_at timestamp default now())', []);
+  await asyncQuery('create table if not exists auth_tokens (token text primary key, user_id text not null, created_at timestamp default now(), expires_at timestamp, foreign key (user_id) references users(id))', []);
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(String(password), salt, 100000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  try {
+    const [salt, hash] = String(stored).split(':');
+    const candidate = crypto.pbkdf2Sync(String(password), salt, 100000, 64, 'sha512').toString('hex');
+    const a = Buffer.from(hash, 'hex');
+    const b = Buffer.from(candidate, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function issueToken(userId, ttlHours = 24 * 30) { // 30 dias
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + ttlHours * 3600_000).toISOString();
+  await asyncQuery('insert into auth_tokens (token, user_id, expires_at) values ($1,$2,$3)', [token, userId, expiresAt]);
+  return token;
+}
+
+function parseAuth(req) {
+  const header = req.headers['authorization'] || '';
+  const m = /^Bearer\s+(.+)$/.exec(header);
+  return m ? m[1] : null;
+}
+
+async function getUserByToken(token) {
+  if (!token) return null;
+  const { rows } = await asyncQuery('select u.id, u.email, t.expires_at from auth_tokens t join users u on u.id=t.user_id where t.token=$1', [token]);
+  const row = rows && rows[0];
+  if (!row) return null;
+  if (row.expires_at && new Date(row.expires_at) < new Date()) {
+    await asyncQuery('delete from auth_tokens where token=$1', [token]);
+    return null;
+  }
+  return { id: row.id, email: row.email };
+}
+
+app.post('/auth/register', async (req, res) => {
+  try {
+    await ensureAuthSchema();
+    const { email, password } = req.body || {};
+    const normEmail = normalizeEmail(email);
+    if (!normEmail || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    const existing = await asyncQuery('select id from users where email=$1', [normEmail]);
+    if (existing.rowCount > 0) return res.status(409).json({ error: 'Email já cadastrado' });
+    const userId = `usr_${crypto.randomBytes(8).toString('hex')}`;
+    const passHash = hashPassword(password);
+    await asyncQuery('insert into users (id, email, password_hash) values ($1,$2,$3)', [userId, normEmail, passHash]);
+    const token = await issueToken(userId);
+    res.json({ token, user: { id: userId, email: normEmail } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/auth/login', async (req, res) => {
-  const { email } = req.body || {};
-  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
-  const user = { id: 'dev-user', email };
-  res.json({ token: 'dev-token', user });
+  try {
+    await ensureAuthSchema();
+    const { email, password } = req.body || {};
+    const normEmail = normalizeEmail(email);
+    if (!normEmail || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    const { rows } = await asyncQuery('select id, password_hash from users where email=$1', [normEmail]);
+    const row = rows && rows[0];
+    if (!row) return res.status(401).json({ error: 'Credenciais inválidas' });
+    const ok = verifyPassword(password, row.password_hash);
+    if (!ok) return res.status(401).json({ error: 'Credenciais inválidas' });
+    const token = await issueToken(row.id);
+    res.json({ token, user: { id: row.id, email: normEmail } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.get('/auth/me', async (_req, res) => {
-  // In a real app, validate Authorization header / cookie
-  res.json({ user: { id: 'dev-user', email: 'dev@example.com' } });
+app.get('/auth/me', async (req, res) => {
+  try {
+    await ensureAuthSchema();
+    const token = parseAuth(req);
+    const user = await getUserByToken(token);
+    if (!user) return res.status(401).json({ error: 'Não autenticado' });
+    res.json({ user });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.post('/auth/logout', async (_req, res) => {
-  res.json({ ok: true });
+app.post('/auth/logout', async (req, res) => {
+  try {
+    const token = parseAuth(req);
+    if (token) await asyncQuery('delete from auth_tokens where token=$1', [token]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Profiles
