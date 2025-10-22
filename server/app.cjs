@@ -10,23 +10,42 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 const app = express();
 
-// CORS dinâmico: permitir origens definidas em CORS_ORIGINS (separadas por vírgula) + localhost dev
-const defaultOrigins = ['http://localhost:5173'];
+// CORS dinâmico: permitir origens definidas em CORS_ORIGINS (separadas por vírgula) + localhost dev + domínio de produção
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:4173',
+  'https://evochat.nowhats.com.br',
+  'http://evochat.nowhats.com.br',
+];
 const envOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 const allowedOrigins = [...defaultOrigins, ...envOrigins];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir requisições sem origem (ex.: curl, serviços internos)
-    if (!origin) return callback(null, true);
-    const isAllowed = allowedOrigins.includes(origin);
-    callback(null, isAllowed);
-  },
-  credentials: true,
-}));
+const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
+  ? {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }
+  : {
+      origin: function (origin, callback) {
+        // Permitir requisições sem origem (ex.: curl, serviços internos)
+        if (!origin) return callback(null, true);
+        const isAllowed = allowedOrigins.includes(origin);
+        callback(null, isAllowed);
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    };
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(bodyParser.json());
 
 // Database setup: try real Postgres, fallback to in-memory
