@@ -75,6 +75,7 @@ app.use(express.static(distPath));
 
 // Database setup: try real Postgres, fallback to in-memory
 let pool;
+let USING_PG_MEM = false;
 const FORCE_PG_MEM = process.env.FORCE_PG_MEM === 'true';
 // Minimal schema for app usage (usado em Postgres real e pg-mem)
 const schemaSql = `
@@ -179,6 +180,7 @@ if (!FORCE_PG_MEM && process.env.DATABASE_URL) {
   const db = newDb();
   const { Pool: MemPool } = db.adapters.createPg();
   pool = new MemPool();
+  USING_PG_MEM = true;
   // Garantir schema também no pg-mem
   db.public.none(schemaSql);
 }
@@ -398,10 +400,21 @@ app.delete('/connections/:id', async (req, res) => {
 app.get('/conversations', async (_req, res) => {
   try {
     const { rows } = await asyncQuery(
-      'select c.*, json_build_object(\'name\', ct.name, \'avatar_url\', ct.avatar_url, \'phone_number\', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id order by c.updated_at desc',
+      'select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id order by c.updated_at desc',
       []
     );
-    res.json(rows);
+    const formatted = rows.map((r) => {
+      const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = r;
+      return {
+        ...rest,
+        contacts: {
+          name: contact_name || null,
+          avatar_url: contact_avatar_url || null,
+          phone_number: contact_phone_number || null,
+        },
+      };
+    });
+    res.json(formatted);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -415,10 +428,21 @@ app.patch('/conversations/:id', async (req, res) => {
     const updated = rows[0];
     // Buscar com contato para manter o formato da lista
     const { rows: convRows } = await asyncQuery(
-      "select c.*, json_build_object('name', ct.name, 'avatar_url', ct.avatar_url, 'phone_number', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+      "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
       [id]
     );
-    const conv = convRows[0] || updated;
+    let conv = convRows[0] || updated;
+    if (conv) {
+      const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conv;
+      conv = {
+        ...rest,
+        contacts: {
+          name: contact_name || null,
+          avatar_url: contact_avatar_url || null,
+          phone_number: contact_phone_number || null,
+        },
+      };
+    }
     // Notificar somente o dono da conversa
     if (updated && updated.user_id) {
       broadcastToUser(updated.user_id, { type: 'conversation_upsert', conversation: conv });
@@ -609,10 +633,34 @@ app.delete('/tags/:id', async (req, res) => {
 app.get('/contacts', async (_req, res) => {
   try {
     const { rows } = await asyncQuery(
-      "select c.*, coalesce((select json_agg(json_build_object('contact_id', ct.contact_id, 'tag_id', ct.tag_id, 'tags', row_to_json(t))) from contact_tags ct join tags t on t.id=ct.tag_id where ct.contact_id=c.id),'[]'::json) as contact_tags from contacts c order by c.created_at desc",
+      "select c.*, ct.tag_id as tag_id, t.id as t_id, t.user_id as t_user_id, t.name as t_name, t.color as t_color, t.created_at as t_created_at from contacts c left join contact_tags ct on ct.contact_id=c.id left join tags t on t.id=ct.tag_id order by c.created_at desc",
       []
     );
-    res.json(rows);
+    const contacts = [];
+    const byId = new Map();
+    for (const r of rows) {
+      const { tag_id, t_id, t_user_id, t_name, t_color, t_created_at, ...base } = r;
+      let obj = byId.get(base.id);
+      if (!obj) {
+        obj = { ...base, contact_tags: [] };
+        byId.set(base.id, obj);
+        contacts.push(obj);
+      }
+      if (tag_id && t_id) {
+        obj.contact_tags.push({
+          contact_id: base.id,
+          tag_id: tag_id,
+          tags: {
+            id: t_id,
+            user_id: t_user_id,
+            name: t_name,
+            color: t_color,
+            created_at: t_created_at,
+          },
+        });
+      }
+    }
+    res.json(contacts);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -639,10 +687,33 @@ app.put('/contacts/:id/tags', async (req, res) => {
       await asyncQuery('insert into contact_tags (contact_id, tag_id) values ($1,$2)', [id, tagId]);
     }
     const { rows } = await asyncQuery(
-      "select c.*, coalesce((select json_agg(json_build_object('contact_id', ct.contact_id, 'tag_id', ct.tag_id, 'tags', row_to_json(t))) from contact_tags ct join tags t on t.id=ct.tag_id where ct.contact_id=c.id),'[]'::json) as contact_tags from contacts c where c.id=$1",
+      "select c.*, ct.tag_id as tag_id, t.id as t_id, t.user_id as t_user_id, t.name as t_name, t.color as t_color, t.created_at as t_created_at from contacts c left join contact_tags ct on ct.contact_id=c.id left join tags t on t.id=ct.tag_id where c.id=$1",
       [id]
     );
-    res.json(rows[0]);
+    const grouped = new Map();
+    for (const r of rows) {
+      const { tag_id, t_id, t_user_id, t_name, t_color, t_created_at, ...base } = r;
+      let obj = grouped.get(base.id);
+      if (!obj) {
+        obj = { ...base, contact_tags: [] };
+        grouped.set(base.id, obj);
+      }
+      if (tag_id && t_id) {
+        obj.contact_tags.push({
+          contact_id: base.id,
+          tag_id: tag_id,
+          tags: {
+            id: t_id,
+            user_id: t_user_id,
+            name: t_name,
+            color: t_color,
+            created_at: t_created_at,
+          },
+        });
+      }
+    }
+    const result = grouped.size ? Array.from(grouped.values())[0] : rows[0];
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -718,12 +789,23 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       [messageId, conversationId, false, content, messageType, ownerUserId]
     );
 
-    // Buscar conversa com contato para broadcast
+    // Buscar conversa com contato para broadcast (webhook)
     const { rows: convRows } = await asyncQuery(
-      "select c.*, json_build_object('name', ct.name, 'avatar_url', ct.avatar_url, 'phone_number', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+      "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
       [conversationId]
     );
-    const conversationWithContact = convRows[0];
+    let conversationWithContact = convRows[0];
+    if (conversationWithContact) {
+      const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conversationWithContact;
+      conversationWithContact = {
+        ...rest,
+        contacts: {
+          name: contact_name || null,
+          avatar_url: contact_avatar_url || null,
+          phone_number: contact_phone_number || null,
+        },
+      };
+    }
 
     // Buscar mensagem para broadcast
     const { rows: msgRows } = await asyncQuery('select * from messages where id=$1', [messageId]);
@@ -743,8 +825,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 // Inicializa schema e só então inicia o servidor
 (async () => {
   try {
-    await asyncQuery(schemaSql, []);
-    console.log('[DB] Schema garantido (create table if not exists)');
+    if (!USING_PG_MEM) {
+      await asyncQuery(schemaSql, []);
+      console.log('[DB] Schema garantido (create table if not exists)');
+    } else {
+      console.log('[DB] Schema já aplicado via pg-mem');
+    }
   } catch (e) {
     console.error('[DB] Falha ao garantir schema:', e?.message || e);
   } finally {

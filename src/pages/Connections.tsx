@@ -79,7 +79,7 @@ export default function Connections() {
   const [connectionToDelete, setConnectionToDelete] = useState<Connection | null>(null);
   
   const { user } = useAuth();
-  const { request: evolutionApiRequest, error: evolutionError } = useEvolutionApi();
+  const { request: evolutionApiRequest } = useEvolutionApi();
   const qrEndpointTemplate = import.meta.env.VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE as string | undefined;
   const webhookUrlEnv = import.meta.env.VITE_EVOLUTION_WEBHOOK_URL as string | undefined;
 
@@ -211,6 +211,118 @@ export default function Connections() {
   }, [connections, selectedConnection, isQrModalOpen]);
 
   // Removido canal de realtime (Supabase); atualiza via fetchConnections após ações
+
+  // Conectar: abre modal, tenta iniciar conexão e obter QR/pareamento
+  const handleConnect = async (connection: Connection) => {
+    try {
+      setSelectedConnection(connection);
+      setIsQrModalOpen(true);
+      setIsConnecting(true);
+
+      // Tenta iniciar a conexão nas rotas conhecidas
+      const connectCandidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'GET' },
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'POST' },
+        { endpoint: `/instance/connect/${connection.instance_name}`, method: 'GET' },
+        { endpoint: `/instance/connect/${connection.instance_name}`, method: 'POST' },
+      ];
+      for (const c of connectCandidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, suppressToast: true, suppressInfoToast: true });
+          break; // qualquer sucesso já é suficiente
+        } catch (_) {
+          // tenta próximo
+        }
+      }
+
+      // Busca QR Code ou código de pareamento
+      const qr = await fetchQrDataWithFallback(connection.instance_name);
+      if (qr) {
+        setQrCodeData(qr.qrCode || '');
+        setPairingCode(qr.pairing || '');
+      } else {
+        setQrCodeData('');
+        setPairingCode('');
+      }
+
+      await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
+      startStatusPolling(connection);
+    } catch (error: any) {
+      toast.error('Erro ao conectar', { description: error.message });
+      setIsConnecting(false);
+    }
+  };
+
+  // Desconectar: tenta múltiplas rotas e atualiza backend/UI
+  const handleDisconnect = async (connection: Connection) => {
+    try {
+      const candidates: Array<{ endpoint: string; method: 'POST' | 'DELETE' }> = [
+        { endpoint: `/instance/disconnect/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/logout/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/close/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/shutdown/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/stop/${connection.instance_name}`, method: 'POST' },
+      ];
+      let success = false;
+      for (const c of candidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, suppressToast: true, suppressInfoToast: true });
+          success = true;
+          break;
+        } catch (_) {
+          // tenta próximo
+        }
+      }
+      if (!success) {
+        throw new Error('Falha ao desconectar em todas as rotas.');
+      }
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+      setIsQrModalOpen(false);
+      setIsConnecting(false);
+      setQrCodeData('');
+      setPairingCode('');
+      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+      toast.success('Instância desconectada.');
+      await fetchConnections();
+    } catch (error: any) {
+      toast.error('Erro ao desconectar', { description: error.message });
+    }
+  };
+
+  // Excluir instância: remove no Evolution API quando possível e no backend
+  const confirmDelete = async () => {
+    if (!connectionToDelete) return;
+    setIsDeleting(true);
+    try {
+      const name = connectionToDelete.instance_name;
+      const candidates: Array<{ endpoint: string; method: 'DELETE' | 'POST' }> = [
+        { endpoint: API_ENDPOINTS.INSTANCE_DELETE(name), method: 'DELETE' },
+        { endpoint: API_ENDPOINTS.INSTANCE_DELETE(name), method: 'POST' },
+        { endpoint: `/instance/delete/${name}`, method: 'DELETE' },
+        { endpoint: `/instance/remove/${name}`, method: 'DELETE' },
+      ];
+      for (const c of candidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, suppressToast: true, suppressInfoToast: true });
+          break;
+        } catch (_) {
+          // tenta próximo
+        }
+      }
+      await dbClient.connections.delete(connectionToDelete.id);
+      toast.success('Instância excluída.');
+      setIsDeleteDialogOpen(false);
+      setConnectionToDelete(null);
+      await fetchConnections();
+    } catch (error: any) {
+      toast.error('Erro ao excluir instância', { description: error.message });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
@@ -363,116 +475,14 @@ export default function Connections() {
 
     if (statusPollRef.current) {
       clearInterval(statusPollRef.current);
+      statusPollRef.current = null;
     }
-    statusPollRef.current = window.setInterval(() => { poll(); }, intervalMs);
-  };
-
-  const handleConnect = async (connection: Connection) => {
-    setSelectedConnection(connection);
-    setIsConnecting(true);
-    setIsQrModalOpen(true);
-    setQrCodeData('');
-    setPairingCode('');
-
-    try {
-      // Atualizar status para connecting
-      await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
-
-      // 1) Chamar endpoint de conexão da Evolution API
-      const connectResponse = await evolutionApiRequest<any>(
-        API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name),
-        { method: 'GET', suppressToast: true }
-      );
-
-      if (!connectResponse) {
-        throw new Error("A Evolution API não respondeu à solicitação de conexão.");
-      }
-
-      // 2) Buscar QR Code com fallback de endpoints
-      const qrData = await fetchQrDataWithFallback(connection.instance_name);
-
-      if (qrData?.qrCode) {
-        setQrCodeData(qrData.qrCode);
-        await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
-        toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
-        startStatusPolling(connection);
-      } else if (qrData?.pairing) {
-        setPairingCode(qrData.pairing);
-        await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
-        toast.success("Código de pareamento gerado! Use-o para conectar.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
-        startStatusPolling(connection);
-      } else {
-        const lastError = evolutionError ? ` Detalhes: ${evolutionError}` : '';
-        throw new Error(`QR Code não foi retornado pela API. Tente novamente em alguns segundos.${lastError}`);
-      }
-
-    } catch (error: any) {
-      toast.error('Falha ao gerar QR Code.', { description: error.message });
-      
-      // Reverter status para disconnected em caso de erro
-      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
-      
-      setIsQrModalOpen(false);
-    } finally {
-      setIsConnecting(false);
-      await fetchConnections(); // Atualizar lista
-    }
-  };
-
-
-  const confirmDelete = async () => {
-    if (!connectionToDelete) return;
-    setIsDeleting(true);
-
-    try {
-      // Primeiro, deletar da Evolution API
-      await evolutionApiRequest(
-        API_ENDPOINTS.INSTANCE_DELETE(connectionToDelete.instance_name),
-        { method: 'DELETE' }
-      );
-
-      // Depois, deletar do backend
-      await dbClient.connections.delete(connectionToDelete.id);
-
-      toast.success('Conexão excluída com sucesso!');
-      setConnections(prev => prev.filter(c => c.id !== connectionToDelete.id));
-      setIsDeleteDialogOpen(false);
-      setConnectionToDelete(null);
-      
-    } catch (error: any) {
-      toast.error('Erro ao excluir conexão', { description: error.message });
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleDisconnect = async (connection: Connection) => {
-    try {
-      const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' | 'DELETE'; body?: string }> = [
-        { endpoint: `/instance/logout/${connection.instance_name}`, method: 'POST' },
-        { endpoint: `/instance/disconnect/${connection.instance_name}`, method: 'POST' },
-        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'DELETE' },
-        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'POST', body: JSON.stringify({ logout: true }) },
-      ];
-      let success = false;
-      for (const c of candidates) {
-        try {
-          await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}) });
-          success = true;
-          break;
-        } catch (_) {
-          // tenta próximo candidato
-        }
-      }
-      if (!success) {
-        throw new Error('Falha ao desconectar em todas as rotas.');
-      }
-      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
-      toast.success('Instância desconectada.');
-      await fetchConnections();
-    } catch (error: any) {
-      toast.error('Erro ao desconectar', { description: error.message });
-    }
+    // Dispara uma verificação imediata para reduzir latência percebida
+    poll().catch(() => {});
+    // Agenda polling periódico
+    statusPollRef.current = window.setInterval(() => {
+      poll().catch(() => {});
+    }, intervalMs);
   };
 
   // Pausar conexão
@@ -487,7 +497,7 @@ export default function Connections() {
       let success = false;
       for (const c of candidates) {
         try {
-          await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}) });
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}), suppressToast: true, suppressInfoToast: true });
           success = true;
           break;
         } catch (_) {
@@ -516,7 +526,7 @@ export default function Connections() {
       let success = false;
       for (const c of candidates) {
         try {
-          await evolutionApiRequest<any>(c.endpoint, { method: c.method });
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, suppressToast: true, suppressInfoToast: true });
           success = true;
           break;
         } catch (_) {
