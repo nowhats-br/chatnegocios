@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Card, { CardHeader, CardTitle } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -22,6 +22,20 @@ import {
 
 type UiStatus = keyof typeof STATUS_CONFIG;
 
+const resolveStatusFromResponse = (res: any, instanceName: string): string | null => {
+  if (!res) return null;
+  if (res?.connected === true || res?.isConnected === true || res?.whatsappConnected === true) return 'CONNECTED';
+  const direct = res?.status || res?.state;
+  const instance = res?.instance || null;
+  const instStatus = instance?.status || instance?.state || null;
+  const listItem = Array.isArray(res?.instances)
+    ? res.instances.find((it: any) => it?.instanceName === instanceName || it?.instance === instanceName)
+    : null;
+  const listStatus = listItem?.status || listItem?.state || null;
+  const candidate = listStatus || instStatus || direct;
+  return candidate ? String(candidate).toUpperCase() : null;
+};
+
 
 export default function Connections() {
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -42,6 +56,8 @@ export default function Connections() {
   const { request: evolutionApiRequest, error: evolutionError } = useEvolutionApi();
   const qrEndpointTemplate = import.meta.env.VITE_EVOLUTION_QR_ENDPOINT_TEMPLATE as string | undefined;
   const webhookUrlEnv = import.meta.env.VITE_EVOLUTION_WEBHOOK_URL as string | undefined;
+
+  const statusPollRef = useRef<number | null>(null);
 
   const fetchQrDataWithFallback = async (instanceName: string) => {
     const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
@@ -94,6 +110,22 @@ export default function Connections() {
   useEffect(() => {
     fetchConnections();
   }, [fetchConnections]);
+
+  useEffect(() => {
+    return () => {
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isQrModalOpen && statusPollRef.current) {
+      clearInterval(statusPollRef.current);
+      statusPollRef.current = null;
+    }
+  }, [isQrModalOpen]);
 
   // Removido canal de realtime (Supabase); atualiza via fetchConnections após ações
 
@@ -164,6 +196,56 @@ export default function Connections() {
     }
   };
 
+  const startStatusPolling = (connection: Connection) => {
+    const intervalMs = 2000;
+    const timeoutMs = 120000; // 2 minutos
+    const startTs = Date.now();
+
+    const poll = async () => {
+      const res = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name), { method: 'GET' });
+      const status = resolveStatusFromResponse(res, connection.instance_name);
+
+      // Atualiza badge em tempo real durante o polling
+      if (status) {
+        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status } : c));
+      }
+
+      if (status === 'CONNECTED') {
+        try {
+          // Atualiza backend e fecha modal
+          await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
+          toast.success('Conectado com sucesso!');
+          setIsQrModalOpen(false);
+          setQrCodeData('');
+          setPairingCode('');
+          await fetchConnections();
+        } catch (e: any) {
+          toast.error('Erro ao atualizar status para conectado', { description: e.message });
+        } finally {
+          setIsConnecting(false);
+        }
+        if (statusPollRef.current) {
+          clearInterval(statusPollRef.current);
+          statusPollRef.current = null;
+        }
+        return;
+      }
+      if (Date.now() - startTs > timeoutMs) {
+        toast.error('Tempo limite para conexão. Tente novamente.');
+        setIsConnecting(false);
+        if (statusPollRef.current) {
+          clearInterval(statusPollRef.current);
+          statusPollRef.current = null;
+        }
+      }
+    };
+
+    if (statusPollRef.current) {
+      clearInterval(statusPollRef.current);
+    }
+    statusPollRef.current = window.setInterval(() => { poll(); }, intervalMs);
+  };
+
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
     setIsConnecting(true);
@@ -173,7 +255,7 @@ export default function Connections() {
 
     try {
       // Atualizar status para connecting
-      await dbClient.connections.update(connection.id, { status: 'connecting' });
+      await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
 
       // 1) Chamar endpoint de conexão da Evolution API
       const connectResponse = await evolutionApiRequest<any>(
@@ -190,12 +272,14 @@ export default function Connections() {
 
       if (qrData?.qrCode) {
         setQrCodeData(qrData.qrCode);
-        await dbClient.connections.update(connection.id, { status: 'connecting' });
+        await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
         toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
+        startStatusPolling(connection);
       } else if (qrData?.pairing) {
         setPairingCode(qrData.pairing);
-        await dbClient.connections.update(connection.id, { status: 'connecting' });
+        await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
         toast.success("Código de pareamento gerado! Use-o para conectar.", { description: `Endpoint: ${qrData.usedEndpoint} (${qrData.usedMethod})` });
+        startStatusPolling(connection);
       } else {
         const lastError = evolutionError ? ` Detalhes: ${evolutionError}` : '';
         throw new Error(`QR Code não foi retornado pela API. Tente novamente em alguns segundos.${lastError}`);
@@ -242,6 +326,30 @@ export default function Connections() {
       toast.error('Erro ao excluir conexão', { description: error.message });
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleDisconnect = async (connection: Connection) => {
+    try {
+      const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' | 'DELETE'; body?: string }> = [
+        { endpoint: `/instance/logout/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/disconnect/${connection.instance_name}`, method: 'POST' },
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'DELETE' },
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'POST', body: JSON.stringify({ logout: true }) },
+      ];
+      for (const c of candidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}) });
+          break;
+        } catch (_) {
+          // tenta próximo candidato
+        }
+      }
+      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+      toast.success('Instância desconectada.');
+      await fetchConnections();
+    } catch (error: any) {
+      toast.error('Erro ao desconectar', { description: error.message });
     }
   };
 
@@ -315,7 +423,7 @@ export default function Connections() {
                           </Button>
                         )}
                         {uiStatus === 'connected' && (
-                          <Button variant="destructive" size="sm">
+                          <Button variant="destructive" size="sm" onClick={() => handleDisconnect(connection)}>
                             <Smartphone className="mr-2 h-4 w-4" />
                             Desconectar
                           </Button>

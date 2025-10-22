@@ -26,6 +26,7 @@ export const STATUS_MAPPING = {
   DISCONNECTED: 'disconnected',
   WAITING_QR_CODE: 'connecting',
   INITIALIZING: 'initializing',
+  PAUSED: 'paused',
 } as const;
 
 export const STATUS_CONFIG = {
@@ -52,5 +53,11 @@ export const STATUS_CONFIG = {
     bgColor: 'bg-blue-100',
     color: 'text-blue-700',
     action: 'Aguardando',
+  },
+  paused: {
+    text: 'Pausado',
+    bgColor: 'bg-gray-200',
+    color: 'text-gray-800',
+    action: 'Retomar',
   },
 } as const;
