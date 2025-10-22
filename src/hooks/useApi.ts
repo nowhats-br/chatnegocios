@@ -12,6 +12,7 @@ interface UseApiReturn<T> {
 interface RequestOptions extends RequestInit {
   suppressToast?: boolean;
   suppressInfoToast?: boolean;
+  timeoutMs?: number;
 }
 
 export function useApi<T>(): UseApiReturn<T> {
@@ -19,7 +20,7 @@ export function useApi<T>(): UseApiReturn<T> {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const { apiUrl, apiKey, isConfigured } = useApiSettings();
-  const defaultTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
+  const defaultTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 30000;
 
   const request = useCallback(async (endpoint: string, options: RequestOptions = {}): Promise<T | null> => {
     setLoading(true);
@@ -35,7 +36,8 @@ export function useApi<T>(): UseApiReturn<T> {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), defaultTimeoutMs);
+    const timeoutMs = options.timeoutMs || defaultTimeoutMs;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(`${apiUrl}${endpoint}`, {
@@ -82,7 +84,7 @@ export function useApi<T>(): UseApiReturn<T> {
       return responseData;
     } catch (err: any) {
       const message = err?.name === 'AbortError'
-        ? `Tempo limite excedido (${defaultTimeoutMs}ms) para ${endpoint}`
+        ? `Tempo limite excedido (${timeoutMs}ms) para ${endpoint}`
         : err?.message || 'Erro desconhecido na requisição.';
       setError(message);
       if (!options.suppressToast) {

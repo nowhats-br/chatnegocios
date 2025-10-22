@@ -29,19 +29,28 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const fetchSettings = useCallback(async () => {
     if (!user) {
+      // Fallback localStorage/env mesmo sem usuário
+      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
+      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
+      setApiUrl(localUrl || envApiUrl || null);
+      setApiKey(localKey || envApiKey || null);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const data = await dbClient.profiles.get(user.id);
-      // Se não houver dados no perfil, manter valores do .env
-      setApiUrl(data.evolution_api_url || envApiUrl || null);
-      setApiKey(data.evolution_api_key || envApiKey || null);
+      // Fallback: se backend não tem perfil, usar localStorage, depois .env
+      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
+      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
+      setApiUrl(data.evolution_api_url || localUrl || envApiUrl || null);
+      setApiKey(data.evolution_api_key || localKey || envApiKey || null);
     } catch (error: any) {
-      // 404 sem perfil: usar valores do .env se disponíveis
-      setApiUrl(envApiUrl || null);
-      setApiKey(envApiKey || null);
+      // 404 sem perfil: usar localStorage/env
+      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
+      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
+      setApiUrl(localUrl || envApiUrl || null);
+      setApiKey(localKey || envApiKey || null);
     }
     setLoading(false);
   }, [user]);
@@ -59,6 +68,11 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.update(user.id, newApiUrl, newApiKey);
       setApiUrl(newApiUrl);
       setApiKey(newApiKey);
+      // Persistência local para evitar perda em reinícios do backend
+      try {
+        localStorage.setItem('evolution_api_url', newApiUrl);
+        localStorage.setItem('evolution_api_key', newApiKey);
+      } catch (_) {}
       toast.success("Configurações da API salvas com sucesso!");
     } catch (error: any) {
       toast.error("Erro ao salvar configurações", { description: error.message });
