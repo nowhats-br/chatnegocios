@@ -10,4 +10,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    allowedHosts: ["evochat.nowhats.com.br"],
+  },
+  preview: {
+    allowedHosts: ["evochat.nowhats.com.br"],
+  },
 })
