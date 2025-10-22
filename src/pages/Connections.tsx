@@ -4,14 +4,14 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, MoreHorizontal, Trash2, Smartphone } from 'lucide-react';
+import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
 import { useEvolutionApi } from '@/hooks/useEvolutionApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_ENDPOINTS } from '@/lib/apiEndpoints';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
+
 import AlertDialog from '@/components/ui/AlertDialog';
 import { 
   EvolutionInstanceCreateRequest, 
@@ -196,6 +196,19 @@ export default function Connections() {
       statusPollRef.current = null;
     }
   }, [isQrModalOpen]);
+
+  // Fecha automaticamente o modal de QR quando a conexão selecionada ficar CONNECTED
+  useEffect(() => {
+    if (isQrModalOpen && selectedConnection) {
+      const current = connections.find(c => c.id === selectedConnection.id);
+      if (current?.status === 'CONNECTED') {
+        setIsQrModalOpen(false);
+        setQrCodeData('');
+        setPairingCode('');
+        setIsConnecting(false);
+      }
+    }
+  }, [connections, selectedConnection, isQrModalOpen]);
 
   // Removido canal de realtime (Supabase); atualiza via fetchConnections após ações
 
@@ -406,10 +419,6 @@ export default function Connections() {
     }
   };
 
-  const handleDelete = (connection: Connection) => {
-    setConnectionToDelete(connection);
-    setIsDeleteDialogOpen(true);
-  };
 
   const confirmDelete = async () => {
     if (!connectionToDelete) return;
@@ -445,19 +454,84 @@ export default function Connections() {
         { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'DELETE' },
         { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'POST', body: JSON.stringify({ logout: true }) },
       ];
+      let success = false;
       for (const c of candidates) {
         try {
           await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}) });
+          success = true;
           break;
         } catch (_) {
           // tenta próximo candidato
         }
+      }
+      if (!success) {
+        throw new Error('Falha ao desconectar em todas as rotas.');
       }
       await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
       toast.success('Instância desconectada.');
       await fetchConnections();
     } catch (error: any) {
       toast.error('Erro ao desconectar', { description: error.message });
+    }
+  };
+
+  // Pausar conexão
+  const handlePause = async (connection: Connection) => {
+    try {
+      const candidates: Array<{ endpoint: string; method: 'POST'; body?: string }> = [
+        { endpoint: `/instance/pause/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/suspend/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/stop/${connection.instance_name}`, method: 'POST' },
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'POST', body: JSON.stringify({ pause: true }) },
+      ];
+      let success = false;
+      for (const c of candidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method, ...(c.body ? { body: c.body } : {}) });
+          success = true;
+          break;
+        } catch (_) {
+          // tenta próximo
+        }
+      }
+      if (!success) {
+        throw new Error('Falha ao pausar em todas as rotas.');
+      }
+      await dbClient.connections.update(connection.id, { status: 'PAUSED' });
+      toast.success('Instância pausada.');
+      await fetchConnections();
+    } catch (error: any) {
+      toast.error('Erro ao pausar', { description: error.message });
+    }
+  };
+
+  // Retomar conexão
+  const handleResume = async (connection: Connection) => {
+    try {
+      const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
+        { endpoint: `/instance/resume/${connection.instance_name}`, method: 'POST' },
+        { endpoint: `/instance/start/${connection.instance_name}`, method: 'POST' },
+        { endpoint: API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), method: 'GET' },
+      ];
+      let success = false;
+      for (const c of candidates) {
+        try {
+          await evolutionApiRequest<any>(c.endpoint, { method: c.method });
+          success = true;
+          break;
+        } catch (_) {
+          // tenta próximo
+        }
+      }
+      if (success) {
+        await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
+        toast.success('Instância retomando...');
+        startStatusPolling(connection);
+      } else {
+        throw new Error('Nenhuma rota de retomada funcionou.');
+      }
+    } catch (error: any) {
+      toast.error('Erro ao retomar', { description: error.message });
     }
   };
 
@@ -502,19 +576,17 @@ export default function Connections() {
                   const isConnectionConnecting = isConnecting && selectedConnection?.id === connection.id;
 
                   return (
-                    <div key={connection.id} className="p-4 flex items-center justify-between hover:bg-accent/50">
+                    <div key={connection.id} className="p-4 flex flex-col space-y-3 hover:bg-accent/50">
                       <div className="flex items-center space-x-3">
                         <Smartphone className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <p className="font-semibold">{connection.instance_name}</p>
-                          <div className="flex items-center space-x-2">
-                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
-                              {statusInfo.text}
-                            </span>
-                          </div>
-                        </div>
+                        <p className="font-semibold">{connection.instance_name}</p>
                       </div>
                       <div className="flex items-center space-x-2">
+                        <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
+                          {statusInfo.text}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-2">
                         {uiStatus === 'disconnected' && (
                           <Button
                             variant="outline"
@@ -531,10 +603,24 @@ export default function Connections() {
                           </Button>
                         )}
                         {uiStatus === 'connected' && (
-                          <Button variant="destructive" size="sm" onClick={() => handleDisconnect(connection)}>
-                            <Smartphone className="mr-2 h-4 w-4" />
-                            Desconectar
-                          </Button>
+                          <>
+                            <Button variant="destructive" size="sm" onClick={() => handleDisconnect(connection)}>
+                              Desconectar
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handlePause(connection)}>
+                              Pausar
+                            </Button>
+                          </>
+                        )}
+                        {uiStatus === 'paused' && (
+                          <>
+                            <Button variant="default" size="sm" onClick={() => handleResume(connection)}>
+                              Retomar
+                            </Button>
+                            <Button variant="destructive" size="sm" onClick={() => handleDisconnect(connection)}>
+                              Desconectar
+                            </Button>
+                          </>
                         )}
                         {uiStatus === 'connecting' && (
                           <Button variant="outline" size="sm" disabled>
@@ -542,23 +628,6 @@ export default function Connections() {
                             Conectando...
                           </Button>
                         )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 p-0 data-[state=open]:bg-muted">
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">Abrir menu</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(connection)}
-                              className="text-destructive hover:!bg-destructive/10 hover:!text-destructive"
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                     </div>
                   );
