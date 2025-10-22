@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
+import Input from '@/components/ui/Input';
+import Button from '@/components/ui/Button';
+import { Loader2, BotMessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { dbClient } from '@/lib/dbClient';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { BotMessageSquare, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 type AuthMode = 'signIn' | 'signUp';
 
@@ -14,6 +15,7 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,10 +26,12 @@ const Login: React.FC = () => {
         const { token, user } = await dbClient.auth.login(email, password);
         localStorage.setItem('auth_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
+        await refresh();
       } else {
         const { token, user } = await dbClient.auth.register(email, password);
         localStorage.setItem('auth_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
+        await refresh();
         toast.success('Cadastro realizado!', {
           description: 'Sua conta foi criada com sucesso.',
         });

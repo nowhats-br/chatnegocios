@@ -5,9 +5,10 @@ interface AuthContextType {
   user: { id: string; email: string } | null;
   loading: boolean;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, loading: true, logout: async () => {} });
+const AuthContext = createContext<AuthContextType>({ user: null, loading: true, logout: async () => {}, refresh: async () => {} });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
@@ -30,6 +31,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { mounted = false; };
   }, []);
 
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const { user } = await dbClient.auth.me();
+      setUser(user ?? null);
+    } catch (_e) {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await dbClient.auth.logout();
@@ -44,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   };
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );
