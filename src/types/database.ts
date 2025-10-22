@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type ConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'WAITING_QR_CODE' | 'INITIALIZING';
+export type ConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'WAITING_QR_CODE' | 'INITIALIZING' | 'PAUSED';
 export type ConversationStatus = 'new' | 'active' | 'pending' | 'resolved';
 export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'product';
 
