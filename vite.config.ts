@@ -12,6 +12,9 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ["evochat.nowhats.com.br"],
+    host: true,
+    port: 5173,
+    strictPort: true,
   },
   preview: {
     allowedHosts: ["evochat.nowhats.com.br"],
