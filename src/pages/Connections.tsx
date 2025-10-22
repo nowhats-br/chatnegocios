@@ -36,6 +36,32 @@ const resolveStatusFromResponse = (res: any, instanceName: string): string | nul
   return candidate ? String(candidate).toUpperCase() : null;
 };
 
+const normalizeStatus = (statusRaw: string | null, res: any): ConnectionStatus => {
+  if (res?.connected === true || res?.isConnected === true || res?.whatsappConnected === true) return 'CONNECTED';
+  const s = (statusRaw || '').toUpperCase();
+  if (!s) {
+    if (res?.qrcode || res?.qrCode || res?.pairingCode) return 'WAITING_QR_CODE';
+    return 'DISCONNECTED';
+  }
+  if ([
+    'CONNECTED', 'ONLINE', 'OPEN', 'LOGGED', 'LOGGED_IN', 'AUTHENTICATED', 'PAIR_SUCCESS'
+  ].includes(s)) return 'CONNECTED';
+  if ([
+    'WAITING_QR_CODE', 'WAITING_QR', 'QRCODE', 'QR_CODE', 'PAIRING', 'QR'
+  ].includes(s)) return 'WAITING_QR_CODE';
+  if ([
+    'INITIALIZING', 'STARTING', 'BOOTING', 'INITIALIZATION'
+  ].includes(s)) return 'INITIALIZING';
+  if ([
+    'PAUSED', 'SUSPENDED'
+  ].includes(s)) return 'PAUSED';
+  if ([
+    'DISCONNECTED', 'CLOSED', 'OFFLINE', 'LOGGED_OUT', 'LOGOUT'
+  ].includes(s)) return 'DISCONNECTED';
+  if (res?.connected === false) return 'DISCONNECTED';
+  if (res?.qrcode || res?.qrCode || res?.pairingCode) return 'WAITING_QR_CODE';
+  return 'DISCONNECTED';
+};
 
 export default function Connections() {
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -114,6 +140,48 @@ export default function Connections() {
   }, [fetchConnections]);
 
   useEffect(() => {
+    const refreshAll = async () => {
+      for (const connection of connections) {
+        const statusCandidates: string[] = [
+          API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name),
+          `/instance/status/${connection.instance_name}`,
+          `/instance/connectionState/${connection.instance_name}`,
+          `/instance/check/${connection.instance_name}`,
+          `/instance/fetchInstances/${connection.instance_name}`,
+          `/instance/fetchInstances`,
+        ];
+
+        let res: any = null;
+        let status: string | null = null;
+        for (const endpoint of statusCandidates) {
+          const attempt = await evolutionApiRequest<any>(endpoint, { method: 'GET', suppressToast: true, suppressInfoToast: true });
+          if (attempt) {
+            const s = resolveStatusFromResponse(attempt, connection.instance_name);
+            if (s) {
+              res = attempt;
+              status = s;
+              break;
+            }
+          }
+        }
+        const normalized = normalizeStatus(status, res);
+        if (normalized === 'CONNECTED' && connection.status !== 'CONNECTED') {
+          await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
+          setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'CONNECTED' } : c));
+          if (selectedConnection?.id === connection.id && isQrModalOpen) {
+            setIsQrModalOpen(false);
+            setQrCodeData('');
+            setPairingCode('');
+          }
+        }
+      }
+    };
+    if (!loading && connections.length > 0) {
+      refreshAll().catch(() => {});
+    }
+  }, [loading, connections, evolutionApiRequest, selectedConnection, isQrModalOpen]);
+
+  useEffect(() => {
     return () => {
       if (statusPollRef.current) {
         clearInterval(statusPollRef.current);
@@ -146,6 +214,7 @@ export default function Connections() {
       const createPayloadTemplate = import.meta.env.VITE_EVOLUTION_CREATE_PAYLOAD_TEMPLATE as string | undefined;
       let createPayload: EvolutionInstanceCreateRequest = {
         instanceName: newConnectionName,
+        token: newConnectionName,
         qrcode: true,
         integration: "WHATSAPP-BAILEYS",
         webhook: {
@@ -166,15 +235,29 @@ export default function Connections() {
         }
       }
 
-      const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(
-        API_ENDPOINTS.INSTANCE_CREATE, 
-        {
+      const createEndpoints = [
+        API_ENDPOINTS.INSTANCE_CREATE,
+        '/instances/create',
+        '/instance',
+        '/whatsapp/instance/create',
+        '/whatsapp/create-instance',
+      ];
+
+      let creationResponse: EvolutionInstanceCreateResponse | null = null;
+      for (const ep of createEndpoints) {
+        const res = await evolutionApiRequest<EvolutionInstanceCreateResponse>(ep, {
           method: 'POST',
           body: JSON.stringify(createPayload),
+          suppressToast: true,
+          suppressInfoToast: true,
+        });
+        if (res) {
+          creationResponse = res;
+          break;
         }
-      );
+      }
 
-      if (!creationResponse || !creationResponse.instance) {
+      if (!creationResponse) {
         throw new Error("A Evolution API não respondeu à criação da instância.");
       }
 
@@ -228,12 +311,14 @@ export default function Connections() {
         }
       }
 
+      const normalized = normalizeStatus(status, res);
+
       // Atualiza badge em tempo real durante o polling
-      if (status) {
-        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: status as ConnectionStatus } : c));
+      if (normalized) {
+        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: normalized } : c));
       }
 
-      if (status === 'CONNECTED') {
+      if (normalized === 'CONNECTED') {
         try {
           // Atualiza backend e fecha modal
           await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
