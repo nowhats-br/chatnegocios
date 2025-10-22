@@ -50,9 +50,12 @@ app.use(bodyParser.json());
 
 // Database setup: try real Postgres, fallback to in-memory
 let pool;
-if (process.env.DATABASE_URL) {
+const FORCE_PG_MEM = process.env.FORCE_PG_MEM === 'true';
+if (!FORCE_PG_MEM && process.env.DATABASE_URL) {
+  console.log('[DB] Using DATABASE_URL (Postgres real)');
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
 } else {
+  console.log(`[DB] Using pg-mem (in-memory${FORCE_PG_MEM ? ' - forced' : ''})`);
   const db = newDb();
   const { Pool: MemPool } = db.adapters.createPg();
   pool = new MemPool();
@@ -135,6 +138,21 @@ if (process.env.DATABASE_URL) {
       contact_id int references contacts(id),
       tag_id text references tags(id)
     );
+
+    create table if not exists users (
+      id text primary key,
+      email text unique not null,
+      password_hash text not null,
+      created_at timestamp default now()
+    );
+
+    create table if not exists auth_tokens (
+      token text primary key,
+      user_id text not null,
+      created_at timestamp default now(),
+      expires_at timestamp,
+      foreign key (user_id) references users(id)
+    );
   `;
   db.public.none(schemaSql);
 }
@@ -154,8 +172,8 @@ const asyncQuery = async (text, params) => {
 const crypto = require('crypto');
 
 async function ensureAuthSchema() {
-  await asyncQuery('create table if not exists users (id text primary key, email text unique not null, password_hash text not null, created_at timestamp default now())', []);
-  await asyncQuery('create table if not exists auth_tokens (token text primary key, user_id text not null, created_at timestamp default now(), expires_at timestamp, foreign key (user_id) references users(id))', []);
+  await asyncQuery('create table if not exists users (id text, email text, password_hash text, created_at text)', []);
+  await asyncQuery('create table if not exists auth_tokens (token text, user_id text, created_at text, expires_at text)', []);
 }
 
 function normalizeEmail(email) {
@@ -220,7 +238,8 @@ app.post('/auth/register', async (req, res) => {
     const token = await issueToken(userId);
     res.json({ token, user: { id: userId, email: normEmail } });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[auth/register] error:', e);
+    res.status(500).json({ error: (e && e.message) ? e.message : 'Erro interno' });
   }
 });
 
@@ -250,7 +269,8 @@ app.get('/auth/me', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Não autenticado' });
     res.json({ user });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[auth/me] error:', e);
+    res.status(500).json({ error: (e && e.message) ? e.message : 'Erro interno' });
   }
 });
 
