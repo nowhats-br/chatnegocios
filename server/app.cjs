@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { newDb } = require('pg-mem');
+const path = require('path');
 
 dotenv.config();
 
@@ -53,6 +54,10 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(bodyParser.json());
+
+// Servir frontend (dist) em produção
+const distPath = path.join(__dirname, '..', 'dist');
+app.use(express.static(distPath));
 
 // Database setup: try real Postgres, fallback to in-memory
 let pool;
@@ -643,6 +648,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   } catch (e) {
     console.error('[DB] Falha ao garantir schema:', e?.message || e);
   } finally {
+    // SPA fallback: retornar index.html para rotas não-API
+    const apiPrefixes = ['/auth','/profiles','/connections','/messages','/conversations','/system','/tags','/products','/contacts'];
+    app.get('*', (req, res, next) => {
+      if (apiPrefixes.some((p) => req.path.startsWith(p))) return next();
+      res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
     app.listen(PORT, () => {
       console.log(`Backend server running on http://localhost:${PORT}`);
     });
