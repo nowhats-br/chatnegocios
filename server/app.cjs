@@ -25,6 +25,8 @@ const defaultOrigins = [
   'http://127.0.0.1:5181',
   'https://evochat.nowhats.com.br',
   'http://evochat.nowhats.com.br',
+  'https://chatvendas.nowhats.com.br',
+  'http://chatvendas.nowhats.com.br',
 ];
 const envOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
