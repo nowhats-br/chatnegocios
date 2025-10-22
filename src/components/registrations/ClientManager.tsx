@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { dbClient } from '@/lib/dbClient';
+import { supabase } from '@/lib/supabase';
 import { Contact } from '@/types/database';
 import { toast } from 'sonner';
 import { Loader2, PlusCircle, MoreHorizontal, Pencil, Trash2, User, AlertTriangle, Tags } from 'lucide-react';
@@ -19,14 +19,17 @@ const ClientManager: React.FC = () => {
 
   const fetchClients = useCallback(async () => {
     setLoading(true);
-    try {
-      const data = await dbClient.contacts.listWithTags();
-      setClients(data as any);
-    } catch (error: any) {
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*, contact_tags(*, tags(*))')
+      .order('created_at', { ascending: false });
+      
+    if (error) {
       toast.error('Erro ao buscar clientes', { description: error.message });
-    } finally {
-      setLoading(false);
+    } else {
+      setClients(data as any);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -51,17 +54,16 @@ const ClientManager: React.FC = () => {
   const confirmDelete = async () => {
     if (!selectedClient) return;
     setIsSubmitting(true);
-    try {
-      await dbClient.contacts.delete(selectedClient.id);
+    const { error } = await supabase.from('contacts').delete().eq('id', selectedClient.id);
+    if (error) {
+      toast.error('Erro ao excluir cliente', { description: error.message });
+    } else {
       toast.success('Cliente excluído com sucesso!');
       setClients(clients.filter(p => p.id !== selectedClient.id));
       setAlertOpen(false);
       setSelectedClient(null);
-    } catch (error: any) {
-      toast.error('Erro ao excluir cliente', { description: error.message });
-    } finally {
-      setIsSubmitting(false);
     }
+    setIsSubmitting(false);
   };
 
   return (

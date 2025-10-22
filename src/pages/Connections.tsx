@@ -146,11 +146,12 @@ export default function Connections() {
       const createPayloadTemplate = import.meta.env.VITE_EVOLUTION_CREATE_PAYLOAD_TEMPLATE as string | undefined;
       let createPayload: EvolutionInstanceCreateRequest = {
         instanceName: newConnectionName,
-        qrcode: false,
+        qrcode: true,
         integration: "WHATSAPP-BAILEYS",
         webhook: {
           url: webhookUrlEnv || `${window.location.origin}/webhook`,
-          enabled: Boolean(webhookUrlEnv),
+          byEvents: true,
+          base64: false,
           events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
         },
       };

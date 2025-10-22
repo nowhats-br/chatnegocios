@@ -1,9 +1,12 @@
 export interface EvolutionWebhookConfig {
   url?: string;
-  enabled?: boolean;
-  events?: string[];
+  // Compatibilidade com diferentes variantes de payload
+  byEvents?: boolean;
+  base64?: boolean;
   webhookByEvents?: boolean;
   webhookBase64?: boolean;
+  events?: string[];
+  headers?: Record<string, string>;
 }
 
 export interface EvolutionInstanceCreateRequest {

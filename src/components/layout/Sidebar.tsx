@@ -42,7 +42,7 @@ const Sidebar: React.FC = () => {
               transition={{ duration: 0.2, delay: 0.1 }}
               className="font-bold text-xl ml-2"
             >
-              EvoChat
+              Chatvendas
             </motion.span>
           )}
         </AnimatePresence>

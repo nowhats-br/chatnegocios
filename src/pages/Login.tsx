@@ -60,7 +60,7 @@ const Login: React.FC = () => {
               {mode === 'signIn' ? 'Bem-vindo de volta!' : 'Crie sua conta'}
             </h1>
             <p className="mt-2 text-muted-foreground">
-              {mode === 'signIn' ? 'Faça login para acessar o EvoChat.' : 'Comece a gerenciar seus atendimentos.'}
+              {mode === 'signIn' ? 'Faça login para acessar o Chatvendas.' : 'Comece a gerenciar seus atendimentos.'}
             </p>
         </div>
         <form className="space-y-6" onSubmit={handleAuth}>

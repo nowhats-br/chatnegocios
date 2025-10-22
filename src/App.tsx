@@ -15,7 +15,7 @@ import { ApiSettingsProvider } from './contexts/ApiSettingsContext';
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="evochat-theme">
+    <ThemeProvider defaultTheme="system" storageKey="chatvendas-theme">
       <AuthProvider>
         <ApiSettingsProvider>
           <Toaster richColors position="top-right" />
