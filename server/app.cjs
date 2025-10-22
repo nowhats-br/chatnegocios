@@ -468,11 +468,36 @@ app.get('/messages', async (req, res) => {
 app.post('/messages', async (req, res) => {
   try {
     const { conversation_id, content, sender_is_user, message_type, user_id } = req.body || {};
+    const id = String(Date.now());
     const { rows } = await asyncQuery(
       'insert into messages (id, conversation_id, content, sender_is_user, message_type, user_id) values ($1,$2,$3,$4,$5,$6) returning *',
-      [String(Date.now()), conversation_id, content || null, !!sender_is_user, message_type, user_id]
+      [id, conversation_id, content || null, !!sender_is_user, message_type, user_id]
     );
-    res.json(rows[0]);
+    const created = rows[0];
+    // Atualiza updated_at da conversa
+    await asyncQuery('update conversations set updated_at=now() where id=$1', [conversation_id]);
+    // Broadcast da nova mensagem e conversa atualizada
+    if (created && created.user_id) {
+      broadcastToUser(created.user_id, { type: 'message_new', message: created });
+      const { rows: convRows } = await asyncQuery(
+        "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+        [conversation_id]
+      );
+      let conv = convRows[0];
+      if (conv) {
+        const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conv;
+        conv = {
+          ...rest,
+          contacts: {
+            name: contact_name || null,
+            avatar_url: contact_avatar_url || null,
+            phone_number: contact_phone_number || null,
+          },
+        };
+        broadcastToUser(created.user_id, { type: 'conversation_upsert', conversation: conv });
+      }
+    }
+    res.json(created);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -729,7 +754,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log('[Webhook] Recebido:', JSON.stringify(payload));
 
-    const ownerUserId = String(payload.user_id || process.env.DEFAULT_USER_ID || 'system');
+    const ownerUserId = String(payload.user_id || req.headers['x-user-id'] || process.env.DEFAULT_USER_ID || 'system');
     const phone = String(payload.from || payload.phone || '').replace(/\D/g, '');
     const content = String(payload.message || payload.text || '');
     const messageType = payload.type === 'image' ? 'image' : (payload.type === 'file' ? 'file' : 'text');

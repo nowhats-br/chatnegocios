@@ -73,6 +73,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     scrollToBottom();
   }, [messages]);
 
+  // WebSocket: escutar novas mensagens para a conversa ativa
+  useEffect(() => {
+    if (!user || !conversation?.id) return;
+    const base = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
+    const wsUrl = base.replace(/^http(s?)/, 'ws$1') + `/ws?user_id=${encodeURIComponent(user.id)}`;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data?.type === 'message_new' && data.message?.conversation_id === conversation.id) {
+          setMessages(prev => [...prev, data.message]);
+        }
+      } catch (_e) {}
+    };
+    return () => { try { ws.close(); } catch (_e) {} };
+  }, [user, conversation.id]);
+
   // Removido canal realtime do Supabase
 
   const handleLocalSendMessage = async (content: string) => {

@@ -84,6 +84,8 @@ export default function Connections() {
   const webhookUrlEnv = import.meta.env.VITE_EVOLUTION_WEBHOOK_URL as string | undefined;
 
   const statusPollRef = useRef<number | null>(null);
+  const connectedNotifiedRef = useRef<Record<string, boolean>>({});
+  const disconnectLockRef = useRef<Record<string, boolean>>({});
 
   const fetchQrDataWithFallback = async (instanceName: string) => {
     const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
@@ -166,12 +168,19 @@ export default function Connections() {
         }
         const normalized = normalizeStatus(status, res);
         if (normalized === 'CONNECTED' && connection.status !== 'CONNECTED') {
-          await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
-          setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'CONNECTED' } : c));
-          if (selectedConnection?.id === connection.id && isQrModalOpen) {
-            setIsQrModalOpen(false);
-            setQrCodeData('');
-            setPairingCode('');
+          const locked = !!disconnectLockRef.current[connection.instance_name];
+          if (locked) {
+            try { await enforceStop(connection.instance_name); } catch (_) {}
+            // Não promover para CONNECTED; força UI como DISCONNECTED
+            setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'DISCONNECTED' } : c));
+          } else {
+            await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
+            setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'CONNECTED' } : c));
+            if (selectedConnection?.id === connection.id && isQrModalOpen) {
+              setIsQrModalOpen(false);
+              setQrCodeData('');
+              setPairingCode('');
+            }
           }
         }
       }
@@ -191,11 +200,12 @@ export default function Connections() {
   }, []);
 
   useEffect(() => {
-    if (!isQrModalOpen && statusPollRef.current) {
+    // Só cancela o polling automaticamente se está em processo de conexão via QR
+    if (!isQrModalOpen && isConnecting && statusPollRef.current) {
       clearInterval(statusPollRef.current);
       statusPollRef.current = null;
     }
-  }, [isQrModalOpen]);
+  }, [isQrModalOpen, isConnecting]);
 
   // Fecha automaticamente o modal de QR quando a conexão selecionada ficar CONNECTED
   useEffect(() => {
@@ -218,6 +228,8 @@ export default function Connections() {
       setSelectedConnection(connection);
       setIsQrModalOpen(true);
       setIsConnecting(true);
+      // Libera qualquer bloqueio de reconexão ao iniciar conexão manualmente
+      disconnectLockRef.current[connection.instance_name] = false;
 
       // Tenta iniciar a conexão nas rotas conhecidas
       const connectCandidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
@@ -246,10 +258,27 @@ export default function Connections() {
       }
 
       await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
+      connectedNotifiedRef.current[connection.id] = false;
       startStatusPolling(connection);
     } catch (error: any) {
       toast.error('Erro ao conectar', { description: error.message });
       setIsConnecting(false);
+    }
+  };
+
+  // Força parada da instância (stop/shutdown/close/logout)
+  const enforceStop = async (instanceName: string) => {
+    const candidates: Array<{ endpoint: string; method: 'POST' }> = [
+      { endpoint: `/instance/stop/${instanceName}`, method: 'POST' },
+      { endpoint: `/instance/shutdown/${instanceName}`, method: 'POST' },
+      { endpoint: `/instance/close/${instanceName}`, method: 'POST' },
+      { endpoint: `/instance/logout/${instanceName}`, method: 'POST' },
+    ];
+    for (const c of candidates) {
+      try {
+        await evolutionApiRequest<any>(c.endpoint, { method: c.method, suppressToast: true, suppressInfoToast: true });
+        break;
+      } catch (_) {}
     }
   };
 
@@ -285,6 +314,8 @@ export default function Connections() {
       setQrCodeData('');
       setPairingCode('');
       await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+      // Bloqueia reconexão automática até ação explícita de conectar/retomar
+      disconnectLockRef.current[connection.instance_name] = true;
       toast.success('Instância desconectada.');
       await fetchConnections();
     } catch (error: any) {
@@ -343,10 +374,11 @@ export default function Connections() {
         qrcode: true,
         integration: "WHATSAPP-BAILEYS",
         webhook: {
-          url: webhookUrlEnv || `${window.location.origin}/webhook`,
+          url: webhookUrlEnv || `${window.location.origin}/api/whatsapp/webhook`,
           byEvents: true,
           base64: false,
           events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+          headers: { 'x-user-id': user?.id || '' },
         },
       };
 
@@ -440,28 +472,36 @@ export default function Connections() {
 
       // Atualiza badge em tempo real durante o polling
       if (normalized) {
-        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: normalized } : c));
-      }
+          const locked = !!disconnectLockRef.current[connection.instance_name];
+          const effective = locked && normalized === 'CONNECTED' ? 'DISCONNECTED' : normalized;
+          setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: effective } : c));
+        }
 
       if (normalized === 'CONNECTED') {
-        try {
-          // Atualiza backend e fecha modal
-          await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
-          toast.success('Conectado com sucesso!');
-          setIsQrModalOpen(false);
-          setQrCodeData('');
-          setPairingCode('');
-          await fetchConnections();
-        } catch (e: any) {
-          toast.error('Erro ao atualizar status para conectado', { description: e.message });
-        } finally {
-          setIsConnecting(false);
+        const locked = !!disconnectLockRef.current[connection.instance_name];
+        if (locked) {
+          try { await enforceStop(connection.instance_name); } catch (_) {}
+          // Não promove para CONNECTED enquanto bloqueado; continua polling
+        } else {
+          try {
+            // Atualiza backend e fecha modal
+            await dbClient.connections.update(connection.id, { status: 'CONNECTED', instance_data: res });
+            toast.success('Conectado com sucesso!');
+            setIsQrModalOpen(false);
+            setQrCodeData('');
+            setPairingCode('');
+            await fetchConnections();
+          } catch (e: any) {
+            toast.error('Erro ao atualizar status para conectado', { description: e.message });
+          } finally {
+            setIsConnecting(false);
+          }
+          if (statusPollRef.current) {
+            clearInterval(statusPollRef.current);
+            statusPollRef.current = null;
+          }
+          return;
         }
-        if (statusPollRef.current) {
-          clearInterval(statusPollRef.current);
-          statusPollRef.current = null;
-        }
-        return;
       }
       if (Date.now() - startTs > timeoutMs) {
         toast.error('Tempo limite para conexão. Tente novamente.');
@@ -518,6 +558,8 @@ export default function Connections() {
   // Retomar conexão
   const handleResume = async (connection: Connection) => {
     try {
+      // Retomar é uma ação explícita: remove bloqueio de reconexão
+      disconnectLockRef.current[connection.instance_name] = false;
       const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
         { endpoint: `/instance/resume/${connection.instance_name}`, method: 'POST' },
         { endpoint: `/instance/start/${connection.instance_name}`, method: 'POST' },
