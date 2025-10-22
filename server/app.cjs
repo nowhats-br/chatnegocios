@@ -16,6 +16,10 @@ const defaultOrigins = [
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:4173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+  'http://localhost:5180',
+  'http://127.0.0.1:5180',
   'https://evochat.nowhats.com.br',
   'http://evochat.nowhats.com.br',
 ];
@@ -30,7 +34,7 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
       origin: true,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'apikey', 'X-API-Key'],
     }
   : {
       origin: function (origin, callback) {
@@ -41,7 +45,7 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'apikey', 'X-API-Key'],
     };
 
 app.use(cors(corsOptions));
@@ -51,16 +55,8 @@ app.use(bodyParser.json());
 // Database setup: try real Postgres, fallback to in-memory
 let pool;
 const FORCE_PG_MEM = process.env.FORCE_PG_MEM === 'true';
-if (!FORCE_PG_MEM && process.env.DATABASE_URL) {
-  console.log('[DB] Using DATABASE_URL (Postgres real)');
-  pool = new Pool({ connectionString: process.env.DATABASE_URL });
-} else {
-  console.log(`[DB] Using pg-mem (in-memory${FORCE_PG_MEM ? ' - forced' : ''})`);
-  const db = newDb();
-  const { Pool: MemPool } = db.adapters.createPg();
-  pool = new MemPool();
-  // Minimal schema for app usage
-  const schemaSql = `
+// Minimal schema for app usage (usado em Postgres real e pg-mem)
+const schemaSql = `
     create table if not exists profiles (
       id text primary key,
       evolution_api_url text,
@@ -154,6 +150,15 @@ if (!FORCE_PG_MEM && process.env.DATABASE_URL) {
       foreign key (user_id) references users(id)
     );
   `;
+if (!FORCE_PG_MEM && process.env.DATABASE_URL) {
+  console.log('[DB] Using DATABASE_URL (Postgres real)');
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
+} else {
+  console.log(`[DB] Using pg-mem (in-memory${FORCE_PG_MEM ? ' - forced' : ''})`);
+  const db = newDb();
+  const { Pool: MemPool } = db.adapters.createPg();
+  pool = new MemPool();
+  // Garantir schema também no pg-mem
   db.public.none(schemaSql);
 }
 
@@ -628,9 +633,19 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-});
+// Inicializa schema e só então inicia o servidor
+(async () => {
+  try {
+    await asyncQuery(schemaSql, []);
+    console.log('[DB] Schema garantido (create table if not exists)');
+  } catch (e) {
+    console.error('[DB] Falha ao garantir schema:', e?.message || e);
+  } finally {
+    app.listen(PORT, () => {
+      console.log(`Backend server running on http://localhost:${PORT}`);
+    });
+  }
+})();
 // System update check/apply endpoints
 app.get('/system/update/check', async (_req, res) => {
   try {
@@ -642,17 +657,40 @@ app.get('/system/update/check', async (_req, res) => {
     if (!repo) {
       return res.status(400).json({ error: 'GITHUB_REPO não configurado' });
     }
-    const ghResp = await fetch(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(branch)}`, {
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'chatnegocios-app'
-      }
+    // Compatível com Node < 18: usa https nativo ao invés de fetch
+    const { URL } = require('url');
+    const https = require('https');
+    const ghJson = await new Promise((resolve, reject) => {
+      const u = new URL(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(branch)}`);
+      const opts = {
+        method: 'GET',
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'chatnegocios-app'
+        }
+      };
+      const req = https.request(opts, (resp) => {
+        let data = '';
+        resp.on('data', (chunk) => { data += chunk; });
+        resp.on('end', () => {
+          const status = resp.statusCode || 0;
+          if (status < 200 || status >= 300) {
+            return reject(new Error(`HTTP ${status}: ${data}`));
+          }
+          try {
+            resolve(JSON.parse(data));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    }).catch((err) => {
+      return res.status(502).json({ error: `Falha ao consultar GitHub: ${err?.message || String(err)}` });
     });
-    if (!ghResp.ok) {
-      const text = await ghResp.text();
-      return res.status(502).json({ error: `Falha ao consultar GitHub: ${text}` });
-    }
-    const ghJson = await ghResp.json();
     const latestSha = ghJson?.sha || '';
     const latestMessage = ghJson?.commit?.message || '';
     const latestDate = ghJson?.commit?.author?.date || '';

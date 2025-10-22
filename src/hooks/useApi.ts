@@ -6,7 +6,12 @@ interface UseApiReturn<T> {
   data: T | null;
   error: string | null;
   loading: boolean;
-  request: (endpoint: string, options?: RequestInit) => Promise<T | null>;
+  request: (endpoint: string, options?: RequestOptions) => Promise<T | null>;
+}
+
+interface RequestOptions extends RequestInit {
+  suppressToast?: boolean;
+  suppressInfoToast?: boolean;
 }
 
 export function useApi<T>(): UseApiReturn<T> {
@@ -16,7 +21,7 @@ export function useApi<T>(): UseApiReturn<T> {
   const { apiUrl, apiKey, isConfigured } = useApiSettings();
   const defaultTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
 
-  const request = useCallback(async (endpoint: string, options: RequestInit = {}): Promise<T | null> => {
+  const request = useCallback(async (endpoint: string, options: RequestOptions = {}): Promise<T | null> => {
     setLoading(true);
     setError(null);
     setData(null);
@@ -39,7 +44,7 @@ export function useApi<T>(): UseApiReturn<T> {
           Accept: 'application/json',
           'Content-Type': 'application/json',
           apikey: apiKey || '',
-          ...options.headers,
+          ...(options.headers || {}),
         },
         signal: options.signal || controller.signal,
       });
@@ -66,8 +71,7 @@ export function useApi<T>(): UseApiReturn<T> {
       } else {
         // Fallback para respostas não-JSON (registrar texto e retornar null)
         const text = await response.text().catch(() => '');
-        if (text) {
-          // Anexar texto bruto ao erro para diagnóstico em chamadas subsequentes
+        if (text && !options.suppressInfoToast) {
           toast.info('Resposta não-JSON recebida da API', { description: text.slice(0, 200) });
         }
         responseData = null;
@@ -81,7 +85,9 @@ export function useApi<T>(): UseApiReturn<T> {
         ? `Tempo limite excedido (${defaultTimeoutMs}ms) para ${endpoint}`
         : err?.message || 'Erro desconhecido na requisição.';
       setError(message);
-      toast.error('Erro na API', { description: message });
+      if (!options.suppressToast) {
+        toast.error('Erro na API', { description: message });
+      }
       setLoading(false);
       return null;
     } finally {

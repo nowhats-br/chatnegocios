@@ -8,9 +8,9 @@ import Button from '@/components/ui/Button';
 import ConversationList from '@/components/chat/ConversationList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import { formatCurrency } from '@/lib/utils';
-import { useApi } from '@/hooks/useApi';
+import { useEvolutionMessaging } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
-import { API_ENDPOINTS } from '@/lib/apiEndpoints';
+
 
 const Chat: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -19,7 +19,7 @@ const Chat: React.FC = () => {
   const [isSalesSidebarOpen, setSalesSidebarOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
-  const messageApi = useApi();
+  const { sendText, sendMedia } = useEvolutionMessaging();
   const { user } = useAuth();
   const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
 
@@ -88,34 +88,35 @@ const Chat: React.FC = () => {
     // 3. Prepare payload and send via API
     const instanceName = connectionData.instance_name;
     const to = activeConversation.contacts.phone_number;
-    let endpoint: string;
-    let body: any;
+    let sendOk = false;
+    let sendError: string | undefined;
 
     switch (type) {
-      case 'text':
-        endpoint = API_ENDPOINTS.SEND_TEXT(instanceName);
-        body = { number: to, textMessage: { text: content } };
+      case 'text': {
+        const res = await sendText(instanceName, to, content);
+        sendOk = res.ok;
+        sendError = res.error;
         break;
-      case 'image':
-        endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
-        body = { number: to, mediaMessage: { mediatype: 'image', media: content, caption: '' } };
+      }
+      case 'image': {
+        const res = await sendMedia(instanceName, to, content, { mediatype: 'image', caption: '' });
+        sendOk = res.ok;
+        sendError = res.error;
         break;
-      case 'file':
-        endpoint = API_ENDPOINTS.SEND_MEDIA(instanceName);
-        body = { number: to, mediaMessage: { mediatype: 'document', media: content, fileName: fileName || 'arquivo' } };
+      }
+      case 'file': {
+        const res = await sendMedia(instanceName, to, content, { mediatype: 'document', fileName: fileName || 'arquivo' });
+        sendOk = res.ok;
+        sendError = res.error;
         break;
+      }
       default:
         toast.error('Tipo de mensagem não suportado.');
         return;
     }
 
-    await messageApi.request(endpoint, {
-        method: 'POST',
-        body: JSON.stringify(body)
-    });
-
-    if(messageApi.error) {
-        toast.error("Falha ao enviar mensagem via API", { description: messageApi.error });
+    if (!sendOk) {
+      toast.error('Falha ao enviar mensagem via API', { description: sendError });
     }
   };
 

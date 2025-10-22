@@ -6,7 +6,12 @@ interface UseEvolutionApiReturn {
   data: any | null;
   error: string | null;
   loading: boolean;
-  request: <R>(endpoint: string, options?: RequestInit) => Promise<R | null>;
+  request: <R>(endpoint: string, options?: RequestOptions) => Promise<R | null>;
+}
+
+interface RequestOptions extends RequestInit {
+  suppressToast?: boolean;
+  suppressInfoToast?: boolean;
 }
 
 export function useEvolutionApi(): UseEvolutionApiReturn {
@@ -14,7 +19,7 @@ export function useEvolutionApi(): UseEvolutionApiReturn {
   const base = useApi<any>();
 
   const request = useCallback(
-    async <R>(endpoint: string, options: RequestInit = {}) => {
+    async <R>(endpoint: string, options: RequestOptions = {}) => {
       const mergedHeaders: HeadersInit = {
         Accept: 'application/json',
         apikey: apiKey || '',

@@ -6,7 +6,7 @@ import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
 import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, MoreHorizontal, Trash2, Smartphone } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
-import { Connection } from '@/types/database';
+import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
 import { useEvolutionApi } from '@/hooks/useEvolutionApi';
 import { useAuth } from '@/contexts/AuthContext';
@@ -75,9 +75,11 @@ export default function Connections() {
     ];
 
     for (const { endpoint, method } of candidates) {
-      const res = await evolutionApiRequest<any>(endpoint, { 
+      const res = await evolutionApiRequest<any>(endpoint, {
         method,
         ...(method === 'POST' ? { body: JSON.stringify({ qrcode: true }) } : {}),
+        suppressToast: true,
+        suppressInfoToast: true,
       });
       const qrCode = res?.qrcode?.base64
         || res?.qrcode?.image
@@ -202,12 +204,32 @@ export default function Connections() {
     const startTs = Date.now();
 
     const poll = async () => {
-      const res = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name), { method: 'GET' });
-      const status = resolveStatusFromResponse(res, connection.instance_name);
+      const statusCandidates: string[] = [
+        API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name),
+        `/instance/status/${connection.instance_name}`,
+        `/instance/connectionState/${connection.instance_name}`,
+        `/instance/check/${connection.instance_name}`,
+        `/instance/fetchInstances/${connection.instance_name}`,
+        `/instance/fetchInstances`,
+      ];
+
+      let res: any = null;
+      let status: string | null = null;
+      for (const endpoint of statusCandidates) {
+        const attempt = await evolutionApiRequest<any>(endpoint, { method: 'GET', suppressToast: true, suppressInfoToast: true });
+        if (attempt) {
+          const s = resolveStatusFromResponse(attempt, connection.instance_name);
+          if (s) {
+            res = attempt;
+            status = s;
+            break;
+          }
+        }
+      }
 
       // Atualiza badge em tempo real durante o polling
       if (status) {
-        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status } : c));
+        setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: status as ConnectionStatus } : c));
       }
 
       if (status === 'CONNECTED') {
@@ -260,7 +282,7 @@ export default function Connections() {
       // 1) Chamar endpoint de conexão da Evolution API
       const connectResponse = await evolutionApiRequest<any>(
         API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name),
-        { method: 'GET' }
+        { method: 'GET', suppressToast: true }
       );
 
       if (!connectResponse) {
