@@ -5,11 +5,23 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { newDb } = require('pg-mem');
 const path = require('path');
+const { WebSocketServer } = require('ws');
 
 dotenv.config();
 
 const PORT = process.env.PORT || 3001;
 const app = express();
+
+// WebSocket registry e helper de broadcast
+const clientsByUser = new Map();
+function broadcastToUser(userId, payload) {
+  const set = clientsByUser.get(String(userId));
+  if (!set || set.size === 0) return;
+  const data = JSON.stringify(payload);
+  set.forEach((ws) => {
+    try { ws.send(data); } catch (_e) {}
+  });
+}
 
 // CORS dinâmico: permitir origens definidas em CORS_ORIGINS (separadas por vírgula) + localhost dev + domínio de produção
 const defaultOrigins = [
@@ -400,7 +412,18 @@ app.patch('/conversations/:id', async (req, res) => {
     const { id } = req.params;
     const { status } = req.body || {};
     const { rows } = await asyncQuery('update conversations set status=$1, updated_at=now() where id=$2 returning *', [status, id]);
-    res.json(rows[0]);
+    const updated = rows[0];
+    // Buscar com contato para manter o formato da lista
+    const { rows: convRows } = await asyncQuery(
+      "select c.*, json_build_object('name', ct.name, 'avatar_url', ct.avatar_url, 'phone_number', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+      [id]
+    );
+    const conv = convRows[0] || updated;
+    // Notificar somente o dono da conversa
+    if (updated && updated.user_id) {
+      broadcastToUser(updated.user_id, { type: 'conversation_upsert', conversation: conv });
+    }
+    res.json(updated);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -634,10 +657,85 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   try {
     const payload = req.body || {};
     console.log('[Webhook] Recebido:', JSON.stringify(payload));
-    // Aqui você pode integrar com tables/messages/contacts conforme necessário
-    // Por agora, apenas confirmamos recebimento
-    res.json({ ok: true });
+
+    const ownerUserId = String(payload.user_id || process.env.DEFAULT_USER_ID || 'system');
+    const phone = String(payload.from || payload.phone || '').replace(/\D/g, '');
+    const content = String(payload.message || payload.text || '');
+    const messageType = payload.type === 'image' ? 'image' : (payload.type === 'file' ? 'file' : 'text');
+    const instanceName = payload.instance_name || payload.instance || null;
+
+    if (!phone || !content) {
+      return res.status(400).json({ error: 'Payload inválido: requer phone/from e message/text' });
+    }
+
+    // Garantir contato
+    let contactId;
+    {
+      const { rows } = await asyncQuery('select id from contacts where user_id=$1 and phone_number=$2', [ownerUserId, phone]);
+      if (rows[0]) {
+        contactId = rows[0].id;
+      } else {
+        const { rows: inserted } = await asyncQuery(
+          'insert into contacts (user_id, phone_number, name, avatar_url) values ($1,$2,$3,$4) returning id',
+          [ownerUserId, phone, payload.name || null, payload.avatar_url || null]
+        );
+        contactId = inserted[0].id;
+      }
+    }
+
+    // Obter conexão
+    let connectionId = null;
+    if (instanceName) {
+      const { rows } = await asyncQuery('select id from connections where instance_name=$1', [instanceName]);
+      connectionId = rows[0]?.id || null;
+    }
+
+    // Conversa: obter ou criar (pendente)
+    let conversationId;
+    {
+      const { rows } = await asyncQuery(
+        'select id, status from conversations where user_id=$1 and contact_id=$2 order by created_at desc limit 1',
+        [ownerUserId, contactId]
+      );
+      const existing = rows[0];
+      if (!existing || (existing.status && existing.status.toLowerCase() === 'resolved')) {
+        conversationId = `conv_${Date.now()}`;
+        await asyncQuery(
+          'insert into conversations (id, user_id, contact_id, connection_id, status) values ($1,$2,$3,$4,$5)',
+          [conversationId, ownerUserId, contactId, connectionId, 'pending']
+        );
+      } else {
+        conversationId = existing.id;
+        const newStatus = existing.status && existing.status.toLowerCase() !== 'active' ? 'pending' : existing.status;
+        await asyncQuery('update conversations set status=$2, updated_at=now() where id=$1', [conversationId, newStatus]);
+      }
+    }
+
+    // Registrar mensagem
+    const messageId = `msg_${Date.now()}`;
+    await asyncQuery(
+      'insert into messages (id, conversation_id, sender_is_user, content, message_type, user_id) values ($1,$2,$3,$4,$5,$6)',
+      [messageId, conversationId, false, content, messageType, ownerUserId]
+    );
+
+    // Buscar conversa com contato para broadcast
+    const { rows: convRows } = await asyncQuery(
+      "select c.*, json_build_object('name', ct.name, 'avatar_url', ct.avatar_url, 'phone_number', ct.phone_number) as contacts from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+      [conversationId]
+    );
+    const conversationWithContact = convRows[0];
+
+    // Buscar mensagem para broadcast
+    const { rows: msgRows } = await asyncQuery('select * from messages where id=$1', [messageId]);
+    const messageRow = msgRows[0];
+
+    // Emitir eventos em tempo real
+    broadcastToUser(ownerUserId, { type: 'conversation_upsert', conversation: conversationWithContact });
+    broadcastToUser(ownerUserId, { type: 'message_new', message: messageRow });
+
+    res.json({ ok: true, conversation_id: conversationId, contact_id: contactId, message_id: messageId });
   } catch (e) {
+    console.error('[Webhook] erro:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -657,11 +755,34 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
     });
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`Backend server running on http://localhost:${PORT}`);
     });
+
+    // Anexar WebSocket server
+    const wss = new WebSocketServer({ server, path: '/ws' });
+    wss.on('connection', (ws, req) => {
+      try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const userId = url.searchParams.get('user_id') || 'system';
+        let set = clientsByUser.get(userId);
+        if (!set) { set = new Set(); clientsByUser.set(userId, set); }
+        set.add(ws);
+        ws.on('close', () => {
+          const s = clientsByUser.get(userId);
+          if (s) {
+            s.delete(ws);
+            if (s.size === 0) clientsByUser.delete(userId);
+          }
+        });
+      } catch (err) {
+        console.error('[WS] erro de conexão:', err?.message || err);
+      }
+    });
+    console.log('[WS] WebSocket ativo em /ws');
   }
 })();
+
 // System update check/apply endpoints
 app.get('/system/update/check', async (_req, res) => {
   try {

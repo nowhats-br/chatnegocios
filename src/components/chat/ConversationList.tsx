@@ -1,6 +1,7 @@
-import React from 'react';
-import { Search, User, Loader2, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, User, Loader2, AlertTriangle, Ticket } from 'lucide-react';
 import { Tabs, TabsTrigger } from '@/components/ui/Tabs';
+import Button from '@/components/ui/Button';
 import { Conversation, ConversationStatus } from '@/types/database';
 import { cn } from '@/lib/utils';
 
@@ -8,6 +9,7 @@ interface ConversationListProps {
   conversations: Conversation[];
   activeConversationId?: string;
   onSelectConversation: (conversation: Conversation) => void;
+  onOpenTicket: (conversation: Conversation) => Promise<void> | void;
   loading: boolean;
   activeFilter: ConversationStatus;
   onFilterChange: (status: ConversationStatus) => void;
@@ -17,17 +19,19 @@ const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
   activeConversationId,
   onSelectConversation,
+  onOpenTicket,
   loading,
   activeFilter,
   onFilterChange
 }) => {
 
   const filters: { label: string; value: ConversationStatus }[] = [
-    { label: 'Ativos', value: 'active' },
+    { label: 'Aberto', value: 'active' },
     { label: 'Pendentes', value: 'pending' },
-    { label: 'Novos', value: 'new' },
-    { label: 'Resolvidos', value: 'resolved' },
+    { label: 'Resolvido', value: 'resolved' },
   ];
+
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   return (
     <div className="w-full md:w-[380px] border-r flex flex-col bg-card">
@@ -82,9 +86,30 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <p className="font-semibold truncate">{convo.contacts?.name || 'Desconhecido'}</p>
-                  <p className="text-xs text-muted-foreground flex-shrink-0">{new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <p className="text-xs text-muted-foreground">{new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+                    {convo.status === 'pending' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Abrir ticket"
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setOpeningId(convo.id);
+                          Promise.resolve(onOpenTicket(convo)).finally(() => setOpeningId(null));
+                        }}
+                        disabled={openingId === convo.id}
+                      >
+                        {openingId === convo.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ticket className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground truncate">Última mensagem aqui...</p>
               </div>

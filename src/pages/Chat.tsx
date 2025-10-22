@@ -21,7 +21,7 @@ const Chat: React.FC = () => {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const { sendText, sendMedia } = useEvolutionMessaging();
   const { user } = useAuth();
-  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
+const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -38,6 +38,40 @@ const Chat: React.FC = () => {
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+// WebSocket para atualizações em tempo real no chat
+useEffect(() => {
+  if (!user) return;
+  const base = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
+  const wsUrl = base.replace(/^http(s?)/, 'ws$1') + `/ws?user_id=${encodeURIComponent(user.id)}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      if (data?.type === 'conversation_upsert' && data.conversation) {
+        const conv = data.conversation as Conversation;
+        setConversations(prev => {
+          const idx = prev.findIndex(c => c.id === conv.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = conv;
+            return next;
+          }
+          return [conv, ...prev];
+        });
+      } else if (data?.type === 'message_new' && data.message) {
+        const msg = data.message as { conversation_id: string };
+        setConversations(prev => prev.map(c => c.id === msg.conversation_id ? { ...c, updated_at: new Date().toISOString() } : c));
+      }
+    } catch (_e) {
+      // ignorar mensagens inválidas
+    }
+  };
+
+  return () => {
+    try { ws.close(); } catch (_e) {}
+  };
+}, [user]);
 
   const fetchProducts = useCallback(async () => {
     setLoadingProducts(true);
@@ -162,6 +196,17 @@ const Chat: React.FC = () => {
     }
   };
 
+  const handleOpenTicket = async (convo: Conversation) => {
+    try {
+      await dbClient.conversations.update(convo.id, { status: 'active' });
+      toast.success('Ticket aberto!');
+      setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'active' } : c));
+      setActiveConversation({ ...convo, status: 'active' });
+      setActiveFilter('active');
+    } catch (error: any) {
+      toast.error('Erro ao abrir ticket', { description: error.message });
+    }
+  };
 
   useEffect(() => {
     if (isSalesSidebarOpen && products.length === 0) {
@@ -177,6 +222,7 @@ const Chat: React.FC = () => {
         conversations={filteredConversations}
         activeConversationId={activeConversation?.id}
         onSelectConversation={setActiveConversation}
+        onOpenTicket={handleOpenTicket}
         loading={loading}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
