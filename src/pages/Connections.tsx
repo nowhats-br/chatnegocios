@@ -4,7 +4,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, MoreVertical, PowerOff, Power, Pause } from 'lucide-react';
+import { Plus, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, Power, Pause } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
@@ -15,7 +15,7 @@ import AlertDialog from '@/components/ui/AlertDialog';
 import { EvolutionInstanceCreateResponse, STATUS_CONFIG } from '@/types/evolution-api';
 import { supabase } from '@/lib/supabase';
 import QRCode from 'react-qr-code';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+
 
 type UiStatus = keyof typeof STATUS_CONFIG;
 
@@ -243,17 +243,7 @@ export default function Connections() {
     }
   };
 
-  const handleDisconnect = async (connection: Connection) => {
-    try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
-        method: 'POST',
-        suppressToast: true,
-      });
-      toast.success('Comando de desconexão enviado.');
-    } catch (error: any) {
-      toast.error('Erro ao desconectar', { description: error.message });
-    }
-  };
+
 
   const handlePause = async (connection: Connection) => {
     try {
@@ -268,10 +258,7 @@ export default function Connections() {
     }
   };
 
-  const handleResume = async (connection: Connection) => {
-    await handleConnect(connection);
-    toast.info('Tentando retomar a conexão...');
-  };
+
 
   const confirmDelete = async () => {
     if (!selectedConnection) return;
