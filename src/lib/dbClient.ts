@@ -5,8 +5,7 @@ import {
   Tag, 
   QuickResponse, 
   Conversation, 
-  Message,
-  Contact
+  Message
 } from '@/types/database';
 
 // Helper para obter o ID do usuário logado
@@ -198,7 +197,7 @@ export const dbClient = {
         // This function is removed as it depends on a complex backend logic not migrated to Supabase functions yet.
         return { available: false, currentSha: 'N/A', latestSha: 'N/A', latestMessage: 'Verificação de atualização desabilitada na migração para Supabase.', latestDate: '', branch: '' };
     },
-    async updateApply() {
+    async updateApply(): Promise<never> {
         throw new Error("Funcionalidade de atualização desabilitada na migração para Supabase.");
     }
   }

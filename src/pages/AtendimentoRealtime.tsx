@@ -144,7 +144,7 @@ const AtendimentoRealtime: React.FC = () => {
     }
 
     if (!result.ok) {
-      toast.error('Falha ao enviar mensagem via API Evolution', { description: result.error });
+      toast.error('Falha ao enviar mensagem via API Evolution', { description: result.error || 'Erro desconhecido' });
     }
     
     return result.ok;

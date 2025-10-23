@@ -24,7 +24,6 @@ const Settings: React.FC = () => {
   });
 
   const [checking, setChecking] = useState(false);
-  const [applyLoading, setApplyLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
     available: boolean;
@@ -58,24 +57,6 @@ const Settings: React.FC = () => {
       setUpdateError(err?.message || 'Falha ao verificar atualizações.');
     } finally {
       setChecking(false);
-    }
-  };
-
-  const handleApplyUpdate = async () => {
-    setApplyLoading(true);
-    setUpdateError(null);
-    try {
-      const res = await dbClient.system.updateApply();
-      if (res.ok) {
-        // Após aplicar, recomendamos recarregar a página para refletir mudanças
-        await handleCheckUpdates();
-      } else {
-        setUpdateError('Atualização não aplicada.');
-      }
-    } catch (err: any) {
-      setUpdateError(err?.message || 'Falha ao aplicar atualização.');
-    } finally {
-      setApplyLoading(false);
     }
   };
 
@@ -165,17 +146,8 @@ const Settings: React.FC = () => {
               </div>
             )}
 
-            {updateInfo?.available && (
-              <div>
-                <Button variant="secondary" onClick={handleApplyUpdate} disabled={applyLoading}>
-                  {applyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Aplicar atualização
-                </Button>
-              </div>
-            )}
-
-            {!updateInfo && (
-              <p className="text-sm text-muted-foreground">Clique em "Verificar atualizações" para checar se há novidades no GitHub.</p>
+            {!updateInfo && !checking && (
+              <p className="text-sm text-muted-foreground">A funcionalidade de atualização via UI foi desabilitada nesta versão. Para atualizar, use os comandos `git pull` no servidor.</p>
             )}
           </div>
         </CardContent>

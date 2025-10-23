@@ -11,7 +11,7 @@ export type ConversationStatus = 'new' | 'active' | 'pending' | 'resolved';
 export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'product';
 
 export interface Connection {
-  id: number;
+  id: string;
   user_id: string;
   instance_name: string;
   status: ConnectionStatus;
@@ -40,13 +40,13 @@ export interface Tag {
 }
 
 export interface ContactTag {
-  contact_id: number;
+  contact_id: string;
   tag_id: string;
   tags: Tag;
 }
 
 export interface Contact {
-  id: number;
+  id: string;
   user_id: string;
   phone_number: string;
   name: string | null;
@@ -91,8 +91,8 @@ export interface TeamMember {
 export interface Conversation {
     id: string;
     user_id: string;
-    contact_id: number;
-    connection_id: number | null;
+    contact_id: string;
+    connection_id: string | null;
     status: ConversationStatus;
     created_at: string;
     updated_at: string;
