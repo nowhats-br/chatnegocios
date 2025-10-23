@@ -7,7 +7,7 @@ import ChatWindow from '@/components/chat/ChatWindow';
 import Button from '@/components/ui/Button';
 import { useEvolutionMessaging } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
-import { CheckCircle, RefreshCw } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
 
 const AtendimentoRealtime: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
