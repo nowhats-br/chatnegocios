@@ -1,24 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
-import Card, { CardHeader, CardTitle } from '@/components/ui/Card';
+import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2 } from 'lucide-react';
+import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, MoreVertical, LogOut, Power } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
 import { useEvolutionApi } from '@/hooks/useEvolutionApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_ENDPOINTS } from '@/lib/apiEndpoints';
-
 import AlertDialog from '@/components/ui/AlertDialog';
-import { 
-  EvolutionInstanceCreateRequest, 
-  EvolutionInstanceCreateResponse, 
-  STATUS_CONFIG,
-} from '@/types/evolution-api';
+import { EvolutionInstanceCreateRequest, EvolutionInstanceCreateResponse, STATUS_CONFIG } from '@/types/evolution-api';
 import { supabase } from '@/lib/supabase';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 
 type UiStatus = keyof typeof STATUS_CONFIG;
 
@@ -40,7 +36,7 @@ export default function Connections() {
   const [qrCodeData, setQrCodeData] = useState<string>('');
   const [pairingCode, setPairingCode] = useState<string>('');
   const [isCreating, setIsCreating] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   
   const { user } = useAuth();
@@ -68,8 +64,7 @@ export default function Connections() {
     if (!user) return;
     const channel = supabase.channel('public:connections')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'connections', filter: `user_id=eq.${user.id}` },
-        (payload) => {
-          console.log('Connection change received:', payload);
+        () => {
           fetchConnections();
         }
       ).subscribe();
@@ -79,38 +74,14 @@ export default function Connections() {
     };
   }, [user, fetchConnections]);
 
-  const enforceWebhookConfig = useCallback(async (instanceName: string) => {
-    if (!user) return;
-    
-    // Constrói a URL do webhook de forma mais robusta
-    const url = webhookUrlEnv || (backendUrl ? `${backendUrl}/whatsapp/webhook` : `${window.location.origin}/api/whatsapp/webhook`);
-
-    const payload = {
-      enabled: true,
-      url,
-      webhook: {
-        url,
-        events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
-        headers: { 'x-user-id': user.id },
-      },
-    };
-    await evolutionApiRequest<any>(`/instance/webhook`, {
-      method: 'POST',
-      body: JSON.stringify({ ...payload, instance: instanceName }),
-      suppressToast: true,
-    }).catch(e => console.warn("Falha ao configurar webhook:", e.message));
-  }, [evolutionApiRequest, webhookUrlEnv, backendUrl, user]);
-
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
     setIsQrModalOpen(true);
-    setIsConnecting(true);
+    setIsConnecting(connection.id);
     setQrCodeData('');
     setPairingCode('');
 
     try {
-      await enforceWebhookConfig(connection.instance_name);
-      
       const res = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), {
         method: 'GET',
         suppressToast: true,
@@ -125,13 +96,11 @@ export default function Connections() {
       if (!qr && !pairing) {
         toast.warning("QR Code não recebido. A instância pode já estar conectando.");
       }
-      
-      // O status será atualizado via webhook/realtime
     } catch (error: any) {
       toast.error('Erro ao iniciar conexão', { description: error.message });
       setIsQrModalOpen(false);
     } finally {
-      setIsConnecting(false);
+      setIsConnecting(null);
     }
   };
 
@@ -142,7 +111,6 @@ export default function Connections() {
         suppressToast: true,
       });
       toast.success('Comando de desconexão enviado.');
-      // O status será atualizado via webhook/realtime
     } catch (error: any) {
       toast.error('Erro ao desconectar', { description: error.message });
     }
@@ -179,19 +147,41 @@ export default function Connections() {
       return;
     }
     setIsCreating(true);
+
+    const webhookUrl = webhookUrlEnv || (backendUrl ? `${backendUrl}/whatsapp/webhook` : `${window.location.origin}/api/whatsapp/webhook`);
+    if (!webhookUrl) {
+      toast.error("Configuração Incompleta", { description: "A URL do backend (VITE_BACKEND_URL) não está definida no seu arquivo .env. Esta URL é necessária para configurar o webhook." });
+      setIsCreating(false);
+      return;
+    }
     
     try {
       const createPayload: EvolutionInstanceCreateRequest = {
         instanceName: newConnectionName,
         qrcode: true,
+        webhook: {
+          url: webhookUrl,
+          webhookByEvents: true,
+          events: [
+            "APPLICATION_STARTUP", "QRCODE_UPDATED", "MESSAGES_SET", "MESSAGES_UPSERT",
+            "MESSAGES_UPDATE", "SEND_MESSAGE", "CONTACTS_SET", "CONTACTS_UPSERT",
+            "CONTACTS_UPDATE", "PRESENCE_UPDATE", "CHATS_SET", "CHATS_UPSERT",
+            "CHATS_UPDATE", "CHATS_DELETE", "GROUPS_UPSERT", "GROUPS_UPDATE",
+            "GROUP_PARTICIPANTS_UPDATE", "CONNECTION_UPDATE",
+          ],
+          headers: { 'x-user-id': user.id },
+        },
       };
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
         method: 'POST',
         body: JSON.stringify(createPayload),
+        suppressToast: true,
       });
 
-      if (!creationResponse) throw new Error("A API Evolution não respondeu à criação da instância.");
+      if (!creationResponse) {
+        throw new Error("A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.");
+      }
 
       await dbClient.connections.create({
         instance_name: newConnectionName,
@@ -210,6 +200,11 @@ export default function Connections() {
     }
   };
 
+  const getPhoneNumber = (connection: Connection) => {
+    const instanceData = connection.instance_data as any;
+    return instanceData?.owner?.split('@')[0] || 'Não disponível';
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -225,7 +220,7 @@ export default function Connections() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {loading && <div className="col-span-full flex justify-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}
         {!loading && connections.length === 0 && (
           <div className="col-span-full text-center py-10 bg-card rounded-lg border">
@@ -237,26 +232,32 @@ export default function Connections() {
         {!loading && connections.map((connection) => {
           const uiStatus: UiStatus = normalizeStatus(connection.status);
           const statusInfo = STATUS_CONFIG[uiStatus];
-          const isSelectedAndConnecting = isConnecting && selectedConnection?.id === connection.id;
+          const isSelectedAndConnecting = isConnecting === connection.id;
 
           return (
-            <Card key={connection.id} className="flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="flex items-center gap-2"><Smartphone className="h-5 w-5" />{connection.instance_name}</CardTitle>
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
-                  {statusInfo.text}
-                </span>
-              </CardHeader>
-              <div className="p-6 pt-0 flex-grow flex flex-col justify-end">
+            <Card key={connection.id} className="flex flex-col justify-between">
+              <div>
+                <CardHeader className="flex-row items-start justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2"><Smartphone className="h-5 w-5" />{connection.instance_name}</CardTitle>
+                    <p className="text-sm text-muted-foreground">{getPhoneNumber(connection)}</p>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
+                    {statusInfo.text}
+                  </span>
+                </CardHeader>
+              </div>
+              <CardContent>
                 <div className="flex items-center gap-2">
                   {uiStatus === 'disconnected' && (
                     <Button className="w-full" onClick={() => handleConnect(connection)} disabled={isSelectedAndConnecting || apiLoading}>
-                      {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+                      {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
                       Conectar
                     </Button>
                   )}
                   {uiStatus === 'connected' && (
                     <Button variant="destructive" className="w-full" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
+                      <LogOut className="mr-2 h-4 w-4" />
                       Desconectar
                     </Button>
                   )}
@@ -266,11 +267,25 @@ export default function Connections() {
                       Conectando...
                     </Button>
                   )}
-                   <Button variant="ghost" size="icon" onClick={() => { setSelectedConnection(connection); setIsDeleteDialogOpen(true); }}>
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
-                   </Button>
+                   <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => handleConnect(connection)}>
+                          <QrCode className="mr-2 h-4 w-4" />
+                          Ver QR Code
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="text-red-500" onSelect={() => { setSelectedConnection(connection); setIsDeleteDialogOpen(true); }}>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                   </DropdownMenu>
                 </div>
-              </div>
+              </CardContent>
             </Card>
           );
         })}

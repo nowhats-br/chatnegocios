@@ -35,9 +35,9 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(bodyParser.json({ limit: '10mb' })); // Aumenta o limite para payloads de webhook
+app.use(bodyParser.json({ limit: '10mb' }));
 
-// Supabase Admin Client (para uso no backend)
+// Supabase Admin Client
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -47,11 +47,10 @@ if (!supabaseUrl || !supabaseServiceKey) {
 }
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-// Servir frontend (dist) em produção
+// Servir frontend
 const distPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(distPath));
 
-// Endpoint de health check
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, status: 'alive', timestamp: new Date().toISOString() });
 });
@@ -60,39 +59,47 @@ app.get('/api/health', (_req, res) => {
 app.post('/api/whatsapp/webhook', async (req, res) => {
   try {
     const payload = req.body || {};
-    console.log('[Webhook] Payload recebido:', JSON.stringify(payload).slice(0, 500));
-
-    const instanceName = payload.instance || payload.instance_name;
+    const instanceName = payload.instance;
     const eventType = String(payload.event || '').toLowerCase();
-
-    // Prioriza user_id vindo do header configurado no webhook da Evolution
-    let ownerUserId = req.headers['x-user-id'] || payload.user_id;
-
-    // Se não houver user_id, tenta encontrar o dono da instância no banco
-    if (!ownerUserId && instanceName) {
-      const { data: connOwner, error } = await supabaseAdmin
-        .from('connections')
-        .select('user_id')
-        .eq('instance_name', instanceName)
-        .single();
-      if (error) console.warn(`[Webhook] Não foi possível encontrar o dono da instância '${instanceName}':`, error.message);
-      if (connOwner) ownerUserId = connOwner.user_id;
-    }
+    const ownerUserId = req.headers['x-user-id'];
 
     if (!ownerUserId) {
-      console.error('[Webhook] Erro crítico: não foi possível determinar o user_id para o evento.');
-      return res.status(400).json({ error: 'user_id não determinado' });
+      console.error(`[Webhook] Erro crítico: user_id não encontrado no header para o evento da instância '${instanceName}'.`);
+      return res.status(400).json({ error: 'x-user-id header é obrigatório' });
     }
 
-    // Processamento de novas mensagens
-    if (eventType === 'messages.upsert' || Array.isArray(payload.data?.messages)) {
+    if (eventType === 'connection.update') {
+      const statusMap = {
+        'open': 'CONNECTED',
+        'close': 'DISCONNECTED',
+        'connecting': 'INITIALIZING',
+      };
+      const newStatus = statusMap[payload.data?.state] || 'DISCONNECTED';
+      const { error } = await supabaseAdmin
+        .from('connections')
+        .update({ status: newStatus, instance_data: payload.data })
+        .eq('instance_name', instanceName)
+        .eq('user_id', ownerUserId);
+      if (error) console.error(`[Webhook] Erro ao atualizar status da conexão '${instanceName}':`, error.message);
+    }
+    
+    else if (eventType === 'qrcode.updated') {
+      const { error } = await supabaseAdmin
+        .from('connections')
+        .update({ status: 'WAITING_QR_CODE' })
+        .eq('instance_name', instanceName)
+        .eq('user_id', ownerUserId);
+      if (error) console.error(`[Webhook] Erro ao atualizar status para WAITING_QR_CODE na instância '${instanceName}':`, error.message);
+    }
+
+    else if (eventType === 'messages.upsert') {
       const messages = payload.data.messages || [];
       for (const msg of messages) {
         const key = msg.key || {};
-        if (key.fromMe) continue; // Ignora mensagens enviadas por nós mesmos
+        if (key.fromMe) continue;
 
         const remoteJid = key.remoteJid || '';
-        if (!remoteJid || remoteJid.endsWith('@g.us')) continue; // Ignora grupos
+        if (!remoteJid || remoteJid.endsWith('@g.us')) continue;
 
         const phone = remoteJid.split('@')[0];
         const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
@@ -100,25 +107,20 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
         if (!phone || !messageContent) continue;
 
-        // 1. Garante que o contato exista (Upsert)
         const { data: contact, error: contactError } = await supabaseAdmin
           .from('contacts')
           .upsert({ user_id: ownerUserId, phone_number: phone, name: pushName }, { onConflict: 'user_id, phone_number' })
           .select()
           .single();
-
         if (contactError) throw new Error(`Erro ao salvar contato: ${contactError.message}`);
 
-        // 2. Garante que a conversa exista (Upsert)
         const { data: conversation, error: convError } = await supabaseAdmin
           .from('conversations')
-          .upsert({ user_id: ownerUserId, contact_id: contact.id, status: 'pending' }, { onConflict: 'user_id, contact_id' })
+          .upsert({ user_id: ownerUserId, contact_id: contact.id, status: 'pending', connection_id: payload.connection_id }, { onConflict: 'user_id, contact_id' })
           .select()
           .single();
-        
         if (convError) throw new Error(`Erro ao salvar conversa: ${convError.message}`);
 
-        // 3. Insere a nova mensagem
         const { error: msgError } = await supabaseAdmin.from('messages').insert({
           id: key.id,
           conversation_id: conversation.id,
@@ -127,8 +129,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           content: messageContent,
           message_type: 'text',
         });
-
-        if (msgError && msgError.code !== '23505') { // Ignora erro de ID duplicado
+        if (msgError && msgError.code !== '23505') {
           console.error(`[Webhook] Erro ao inserir mensagem ${key.id}:`, msgError.message);
         }
       }
@@ -141,7 +142,6 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   }
 });
 
-// SPA fallback: retornar index.html para rotas não-API
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
