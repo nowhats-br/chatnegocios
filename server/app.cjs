@@ -9,10 +9,51 @@ const { WebSocketServer } = require('ws');
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3001;
-const app = express();
-
-// WebSocket registry e helper de broadcast
+// Helper HTTP/HTTPS para Evolution API (compatível com Node < 18)
+const http = require('http');
+const https = require('https');
+function evoRequestJson(baseUrl, path, apiKey, method = 'GET', bodyObj = null) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(path, baseUrl.endsWith('/') ? baseUrl : baseUrl + '/');
+      const isHttps = url.protocol === 'https:';
+      const dataStr = bodyObj ? JSON.stringify(bodyObj) : null;
+      const options = {
+        method,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'apikey': apiKey || '',
+          'X-API-Key': apiKey || '',
+          'Authorization': apiKey ? `Bearer ${apiKey}` : '',
+        },
+      };
+      const req = (isHttps ? https : http).request(url, options, (res) => {
+        let chunks = [];
+        res.on('data', (d) => chunks.push(d));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks).toString('utf-8');
+          try {
+            const json = JSON.parse(buf);
+            resolve(json);
+          } catch (e) {
+            reject(new Error(`Evolution response not JSON: ${buf.slice(0,200)}`));
+          }
+        });
+      });
+      req.on('error', (err) => reject(err));
+      if (dataStr) req.write(dataStr);
+      req.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+ 
+ const PORT = process.env.PORT || 3001;
+ const app = express();
+ 
+ // WebSocket registry e helper de broadcast
 const clientsByUser = new Map();
 function broadcastToUser(userId, payload) {
   const set = clientsByUser.get(String(userId));
@@ -654,7 +695,7 @@ app.delete('/tags/:id', async (req, res) => {
   }
 });
 
-// Contacts (with tags)
+// Conversations (with tags)
 app.get('/contacts', async (_req, res) => {
   try {
     const { rows } = await asyncQuery(
