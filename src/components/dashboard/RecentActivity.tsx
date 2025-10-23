@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { faker } from '@faker-js/faker';
-import { User, MessageSquare } from 'lucide-react';
 
 interface Activity {
   id: string;

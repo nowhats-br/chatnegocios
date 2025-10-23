@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/DropdownMenu';
 import Button from '../ui/Button';
+import { toast } from 'sonner';
 
 const Header: React.FC = () => {
   const { theme, setTheme } = useTheme();

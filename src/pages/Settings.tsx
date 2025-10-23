@@ -8,7 +8,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
-import { dbClient } from '@/lib/dbClient';
 
 const settingsSchema = z.object({
   apiUrl: z.string().url("Por favor, insira uma URL válida."),

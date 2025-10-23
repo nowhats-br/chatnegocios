@@ -15,7 +15,7 @@ const Dashboard: React.FC = () => {
     { title: 'Atendimentos Resolvidos (Hoje)', value: '87', icon: CheckCircle, change: '+12.1%', changeType: 'increase', color: 'text-green-500' },
     { title: 'Conversões em Vendas', value: 'R$ 2.350', icon: DollarSign, change: '-1.8%', changeType: 'decrease', color: 'text-amber-500' },
     { title: 'Novos Contatos (Hoje)', value: '45', icon: UserPlus, change: '+5', changeType: 'increase', color: 'text-purple-500' },
-  ];
+  ] as const;
 
   return (
     <div className="space-y-6">

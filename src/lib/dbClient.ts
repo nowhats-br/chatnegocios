@@ -48,7 +48,7 @@ export const dbClient = {
       if (error) throw error;
     },
     async ensureExists() {
-      const { error } = await supabase.rpc('ensure_profile_exists');
+      const { error } = await supabase.rpc('ensure_profile_exists' as any);
       if (error) {
           console.error("Error ensuring profile exists:", error);
       }
