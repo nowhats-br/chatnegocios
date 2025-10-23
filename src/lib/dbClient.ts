@@ -5,7 +5,8 @@ import {
   Tag, 
   QuickResponse, 
   Conversation, 
-  Message
+  Message,
+  ConnectionStatus
 } from '@/types/database';
 
 // Helper para obter o ID do usuário logado
@@ -51,18 +52,23 @@ export const dbClient = {
     async list(): Promise<Connection[]> {
       const { data, error } = await supabase.from('connections').select('*').order('created_at', { ascending: false });
       if (error) throw error;
-      return data;
+      return data as Connection[];
     },
-    async create(payload: { instance_name: string; status?: string; instance_data?: any }): Promise<Connection> {
+    async create(payload: { instance_name: string; status?: ConnectionStatus; instance_data?: any }): Promise<Connection> {
       const userId = await getUserId();
-      const { data, error } = await supabase.from('connections').insert({ ...payload, user_id: userId }).select().single();
+      const { data, error } = await supabase.from('connections').insert({ 
+        user_id: userId,
+        instance_name: payload.instance_name,
+        status: payload.status || 'DISCONNECTED',
+        instance_data: payload.instance_data
+      }).select().single();
       if (error) throw error;
-      return data;
+      return data as Connection;
     },
-    async update(id: string, patch: { status?: string; instance_data?: any }): Promise<Connection> {
+    async update(id: string, patch: { status?: ConnectionStatus; instance_data?: any }): Promise<Connection> {
       const { data, error } = await supabase.from('connections').update(patch).eq('id', id).select().single();
       if (error) throw error;
-      return data;
+      return data as Connection;
     },
     async delete(id: string): Promise<void> {
       const { error } = await supabase.from('connections').delete().eq('id', id);
@@ -73,19 +79,19 @@ export const dbClient = {
     async listWithContact(): Promise<Conversation[]> {
       const { data, error } = await supabase.from('conversations').select('*, contacts(*)').order('updated_at', { ascending: false });
       if (error) throw error;
-      return data as unknown as Conversation[];
+      return data as Conversation[];
     },
     async update(id: string, patch: { status: string }): Promise<Conversation> {
       const { data, error } = await supabase.from('conversations').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id).select().single();
       if (error) throw error;
-      return data;
+      return data as Conversation;
     },
   },
   messages: {
     async listByConversation(conversationId: string): Promise<Message[]> {
       const { data, error } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
       if (error) throw error;
-      return data;
+      return data as Message[];
     },
     async create(payload: { conversation_id: string; content: string | null; sender_is_user: boolean; message_type: string; }): Promise<Message> {
       const userId = await getUserId();
@@ -93,7 +99,7 @@ export const dbClient = {
       if (error) throw error;
       // Trigger update on conversation
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', payload.conversation_id);
-      return data;
+      return data as Message;
     },
   },
   quickResponses: {
@@ -122,18 +128,18 @@ export const dbClient = {
     async list(): Promise<Product[]> {
       const { data, error } = await supabase.from('products').select('*');
       if (error) throw error;
-      return data;
+      return data as Product[];
     },
     async create(payload: { name: string; description?: string | null; price: number; stock: number; image_url?: string | null; category?: string | null }): Promise<Product> {
       const userId = await getUserId();
       const { data, error } = await supabase.from('products').insert({ ...payload, user_id: userId }).select().single();
       if (error) throw error;
-      return data;
+      return data as Product;
     },
     async update(id: string, payload: Partial<Product>): Promise<Product> {
       const { data, error } = await supabase.from('products').update(payload).eq('id', id).select().single();
       if (error) throw error;
-      return data;
+      return data as Product;
     },
     async delete(id: string): Promise<void> {
       const { error } = await supabase.from('products').delete().eq('id', id);

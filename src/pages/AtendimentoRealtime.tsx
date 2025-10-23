@@ -5,7 +5,7 @@ import { Conversation, ConversationStatus, Message as TMessage } from '@/types/d
 import { dbClient } from '@/lib/dbClient';
 import ConversationList from '@/components/chat/ConversationList';
 import ChatWindow from '@/components/chat/ChatWindow';
-import { useEvolutionMessaging } from '@/hooks/useEvolutionMessaging';
+import { useEvolutionMessaging, SendTextResult, SendMediaResult } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
 import placeholderChat from '/placeholder-chat.svg';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -97,6 +97,11 @@ const AtendimentoRealtime: React.FC = () => {
       return false;
     }
 
+    if (!activeConversation.connection_id) {
+        toast.error('Esta conversa não está vinculada a nenhuma conexão ativa.');
+        return false;
+    }
+
     try {
       await dbClient.messages.create({
         conversation_id: activeConversation.id,
@@ -129,7 +134,7 @@ const AtendimentoRealtime: React.FC = () => {
         return false;
     }
 
-    let result = { ok: false, error: 'Tipo de mensagem não suportado.' };
+    let result: SendTextResult | SendMediaResult = { ok: false, error: 'Tipo de mensagem não suportado.' };
 
     switch (type) {
       case 'text':
