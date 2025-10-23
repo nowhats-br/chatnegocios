@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const productSchema = z.object({
   name: z.string().min(3, "O nome deve ter pelo menos 3 caracteres."),
   price: z.coerce.number().positive("O preço deve ser um número positivo."),
-  stock: z.coerce.number().int().nonnegative("O estoque deve ser um número inteiro não negativo."),
+  stock: z.coerce.number().int().nonnegative("O estoque deve ser um número inteiro não negativo.").nullable(),
   description: z.string().optional(),
   image_url: z.string().url("URL da imagem inválida.").optional().or(z.literal('')),
 });
@@ -42,7 +42,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
       reset({
         name: product.name,
         price: product.price,
-        stock: product.stock,
+        stock: product.stock ?? 0,
         description: product.description || '',
         image_url: product.image_url || '',
       });
@@ -66,6 +66,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
     try {
       const productData = { 
         ...data, 
+        stock: data.stock,
         image_url: data.image_url || null,
         user_id: user.id 
       };
@@ -131,5 +132,3 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
     </Modal>
   );
 };
-
-export default ProductForm;

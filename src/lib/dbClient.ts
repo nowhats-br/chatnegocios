@@ -130,7 +130,7 @@ export const dbClient = {
       if (error) throw error;
       return data as Product[];
     },
-    async create(payload: { name: string; description?: string | null; price: number; stock: number; image_url?: string | null; category?: string | null }): Promise<Product> {
+    async create(payload: { name: string; description?: string | null; price: number; stock: number | null; image_url?: string | null; category?: string | null }): Promise<Product> {
       const userId = await getUserId();
       const { data, error } = await supabase.from('products').insert({ ...payload, user_id: userId }).select().single();
       if (error) throw error;
