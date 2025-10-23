@@ -132,3 +132,5 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
     </Modal>
   );
 };
+
+export default ProductForm;
