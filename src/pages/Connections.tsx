@@ -4,7 +4,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, MoreVertical, LogOut, Power } from 'lucide-react';
+import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, MoreVertical, PowerOff, Power, Pause } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
@@ -106,7 +106,7 @@ export default function Connections() {
 
   const handleDisconnect = async (connection: Connection) => {
     try {
-      await evolutionApiRequest<any>(`/instance/logout/${connection.instance_name}`, {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
         method: 'POST',
         suppressToast: true,
       });
@@ -114,6 +114,24 @@ export default function Connections() {
     } catch (error: any) {
       toast.error('Erro ao desconectar', { description: error.message });
     }
+  };
+
+  const handlePause = async (connection: Connection) => {
+    try {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
+        method: 'POST',
+        suppressToast: true,
+      });
+      toast.success('Comando para pausar enviado.');
+      await dbClient.connections.update(connection.id, { status: 'PAUSED' });
+    } catch (error: any) {
+      toast.error('Erro ao pausar conexão', { description: error.message });
+    }
+  };
+
+  const handleResume = async (connection: Connection) => {
+    await handleConnect(connection);
+    toast.info('Tentando retomar a conexão...');
   };
 
   const confirmDelete = async () => {
@@ -167,7 +185,7 @@ export default function Connections() {
     try {
       const createPayload: any = {
         instanceName: newConnectionName,
-        qrcode: true,
+        qrcode: false,
         webhook: {
           url: finalWebhookUrl,
           webhookByEvents: true,
@@ -265,24 +283,36 @@ export default function Connections() {
               </div>
               <CardContent>
                 <div className="flex items-center gap-2">
-                  {uiStatus === 'disconnected' && (
-                    <Button className="w-full" onClick={() => handleConnect(connection)} disabled={isSelectedAndConnecting || apiLoading}>
-                      {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
-                      Conectar
-                    </Button>
-                  )}
-                  {uiStatus === 'connected' && (
-                    <Button variant="destructive" className="w-full" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Desconectar
-                    </Button>
-                  )}
-                  {uiStatus === 'connecting' && (
-                    <Button className="w-full" variant="outline" disabled>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Conectando...
-                    </Button>
-                  )}
+                    {uiStatus === 'disconnected' && (
+                      <Button className="w-full" onClick={() => handleConnect(connection)} disabled={isSelectedAndConnecting || apiLoading}>
+                        {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
+                        Conectar
+                      </Button>
+                    )}
+                    {uiStatus === 'connected' && (
+                      <>
+                        <Button variant="outline" className="flex-1" onClick={() => handlePause(connection)} disabled={apiLoading}>
+                          <Pause className="mr-2 h-4 w-4" />
+                          Pausar
+                        </Button>
+                        <Button variant="destructive" className="flex-1" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
+                          <PowerOff className="mr-2 h-4 w-4" />
+                          Desconectar
+                        </Button>
+                      </>
+                    )}
+                    {uiStatus === 'connecting' && (
+                      <Button className="w-full" variant="outline" disabled>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Conectando...
+                      </Button>
+                    )}
+                    {uiStatus === 'paused' && (
+                      <Button className="w-full" onClick={() => handleResume(connection)} disabled={isSelectedAndConnecting || apiLoading}>
+                        {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
+                        Retomar
+                      </Button>
+                    )}
                    <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">

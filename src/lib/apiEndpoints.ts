@@ -32,6 +32,18 @@ export const API_ENDPOINTS = {
   INSTANCE_DELETE: (instanceName: string) => `/instance/delete/${instanceName}`,
 
   /**
+   * Endpoint to logout (disconnect) an instance.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_LOGOUT: (instanceName: string) => `/instance/logout/${instanceName}`,
+
+  /**
+   * Endpoint to pause an instance's connection.
+   * @param instanceName The name of the WhatsApp instance.
+   */
+  INSTANCE_PAUSE: (instanceName: string) => `/instance/pause/${instanceName}`,
+
+  /**
    * Endpoint for sending a text message.
    * @param instanceName The name of the WhatsApp instance.
    */
