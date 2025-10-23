@@ -41,8 +41,9 @@ const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
 // WebSocket para atualizações em tempo real no chat
 useEffect(() => {
   if (!user) return;
-  const base = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
-  const wsUrl = base.replace(/^http(s?)/, 'ws$1') + `/ws?user_id=${encodeURIComponent(user.id)}`;
+  const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
+  const wsSchemeBase = apiBase.startsWith('https') ? apiBase.replace(/^https/, 'wss') : apiBase.replace(/^http/, 'ws');
+  const wsUrl = `${wsSchemeBase}/ws?user_id=${encodeURIComponent(user.id)}`;
   const ws = new WebSocket(wsUrl);
 
   ws.onmessage = (evt) => {
