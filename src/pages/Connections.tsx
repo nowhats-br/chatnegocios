@@ -46,6 +46,7 @@ export default function Connections() {
   const { user } = useAuth();
   const { request: evolutionApiRequest, loading: apiLoading } = useEvolutionApi();
   const webhookUrlEnv = import.meta.env.VITE_EVOLUTION_WEBHOOK_URL as string | undefined;
+  const backendUrl = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
   const fetchConnections = useCallback(async () => {
     setLoading(true);
@@ -80,7 +81,10 @@ export default function Connections() {
 
   const enforceWebhookConfig = useCallback(async (instanceName: string) => {
     if (!user) return;
-    const url = webhookUrlEnv || `${window.location.origin.replace('http', 'https')}/api/whatsapp/webhook`;
+    
+    // Constrói a URL do webhook de forma mais robusta
+    const url = webhookUrlEnv || (backendUrl ? `${backendUrl}/whatsapp/webhook` : `${window.location.origin}/api/whatsapp/webhook`);
+
     const payload = {
       enabled: true,
       url,
@@ -95,7 +99,7 @@ export default function Connections() {
       body: JSON.stringify({ ...payload, instance: instanceName }),
       suppressToast: true,
     }).catch(e => console.warn("Falha ao configurar webhook:", e.message));
-  }, [evolutionApiRequest, webhookUrlEnv, user]);
+  }, [evolutionApiRequest, webhookUrlEnv, backendUrl, user]);
 
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
