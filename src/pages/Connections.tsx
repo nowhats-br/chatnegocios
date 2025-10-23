@@ -74,6 +74,20 @@ export default function Connections() {
     };
   }, [user, fetchConnections]);
 
+  useEffect(() => {
+    if (!isQrModalOpen || !selectedConnection) return;
+    const updated = connections.find(c => c.id === selectedConnection.id);
+    if (!updated) return;
+    setSelectedConnection(updated);
+    const uiStatus = normalizeStatus(updated.status);
+    if (uiStatus === 'connected') {
+      setIsQrModalOpen(false);
+      setQrCodeData('');
+      setPairingCode('');
+      toast.success('Conectado com sucesso.');
+    }
+  }, [connections, isQrModalOpen, selectedConnection]);
+
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
     setIsQrModalOpen(true);
@@ -87,8 +101,17 @@ export default function Connections() {
         suppressToast: true,
       });
 
-      const qr = res?.base64 || res?.qrcode;
-      const pairing = res?.pairingCode;
+      let qr = res?.base64 || res?.qrcode;
+      let pairing = res?.pairingCode;
+
+      if (!qr && !pairing) {
+        const qrRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_QR_CODE(connection.instance_name), {
+          method: 'GET',
+          suppressToast: true,
+        });
+        qr = qrRes?.base64 || qrRes?.qrcode;
+        pairing = pairing || qrRes?.pairingCode;
+      }
 
       if (qr) setQrCodeData(qr);
       if (pairing) setPairingCode(pairing);
