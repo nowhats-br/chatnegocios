@@ -15,6 +15,7 @@ async function http<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isJson = contentType.includes('application/json');
   const body = isJson ? await res.json() : await res.text();
   if (!res.ok) {
+    console.error('[HTTP]', { url: `${BASE_URL}${path}`, status: res.status, body });
     const message = typeof body === 'string' ? body : body?.error || 'Erro na requisição';
     throw new Error(message);
   }
