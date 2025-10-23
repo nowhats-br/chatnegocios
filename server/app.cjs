@@ -754,7 +754,18 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log('[Webhook] Recebido:', JSON.stringify(payload));
 
-    const ownerUserId = String(payload.user_id || req.headers['x-user-id'] || process.env.DEFAULT_USER_ID || 'system');
+    let ownerUserId = String(payload.user_id || req.headers['x-user-id'] || process.env.DEFAULT_USER_ID || 'system');
+    // Se a instância estiver associada a uma conexão, usar o dono dessa conexão
+    if (instanceName) {
+      try {
+        const { rows: connOwnerRows } = await asyncQuery('select user_id from connections where instance_name=$1 limit 1', [instanceName]);
+        if (connOwnerRows && connOwnerRows[0]?.user_id) {
+          ownerUserId = String(connOwnerRows[0].user_id);
+        }
+      } catch (_e) {
+        // manter ownerUserId pelo fallback
+      }
+    }
     const phone = String(payload.from || payload.phone || '').replace(/\D/g, '');
     const content = String(payload.message || payload.text || '');
     const messageType = payload.type === 'image' ? 'image' : (payload.type === 'file' ? 'file' : 'text');

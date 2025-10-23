@@ -44,33 +44,48 @@ useEffect(() => {
   const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
   const wsSchemeBase = apiBase.startsWith('https') ? apiBase.replace(/^https/, 'wss') : apiBase.replace(/^http/, 'ws');
   const wsUrl = `${wsSchemeBase}/ws?user_id=${encodeURIComponent(user.id)}`;
-  const ws = new WebSocket(wsUrl);
 
-  ws.onmessage = (evt) => {
-    try {
-      const data = JSON.parse(evt.data);
-      if (data?.type === 'conversation_upsert' && data.conversation) {
-        const conv = data.conversation as Conversation;
-        setConversations(prev => {
-          const idx = prev.findIndex(c => c.id === conv.id);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = conv;
-            return next;
-          }
-          return [conv, ...prev];
-        });
-      } else if (data?.type === 'message_new' && data.message) {
-        const msg = data.message as { conversation_id: string };
-        setConversations(prev => prev.map(c => c.id === msg.conversation_id ? { ...c, updated_at: new Date().toISOString() } : c));
-      }
-    } catch (_e) {
-      // ignorar mensagens inválidas
-    }
+  let killed = false;
+  let attempts = 0;
+  let ws: WebSocket | null = null;
+
+  const connect = () => {
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => { attempts = 0; };
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data?.type === 'conversation_upsert' && data.conversation) {
+          const conv = data.conversation as Conversation;
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === conv.id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = conv;
+              return next;
+            }
+            return [conv, ...prev];
+          });
+        } else if (data?.type === 'message_new' && data.message) {
+          const msg = data.message as { conversation_id: string };
+          setConversations(prev => prev.map(c => c.id === msg.conversation_id ? { ...c, updated_at: new Date().toISOString() } : c));
+        }
+      } catch (_e) {}
+    };
+    ws.onerror = () => { /* reconectar no close */ };
+    ws.onclose = () => {
+      if (killed) return;
+      attempts += 1;
+      const delay = Math.min(1000 * Math.pow(2, attempts), 10000);
+      setTimeout(connect, delay);
+    };
   };
 
+  connect();
+
   return () => {
-    try { ws.close(); } catch (_e) {}
+    killed = true;
+    try { ws?.close(); } catch (_e) {}
   };
 }, [user]);
 

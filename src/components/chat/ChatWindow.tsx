@@ -79,16 +79,44 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
     const wsSchemeBase = apiBase.startsWith('https') ? apiBase.replace(/^https/, 'wss') : apiBase.replace(/^http/, 'ws');
     const wsUrl = `${wsSchemeBase}/ws?user_id=${encodeURIComponent(user.id)}`;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        if (data?.type === 'message_new' && data.message?.conversation_id === conversation.id) {
-          setMessages(prev => [...prev, data.message]);
-        }
-      } catch (_e) {}
+  
+    let killed = false;
+    let attempts = 0;
+    let ws: WebSocket | null = null;
+  
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        attempts = 0;
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (data?.type === 'message_new' && data.message?.conversation_id === conversation.id) {
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === data.message.id);
+              return exists ? prev : [...prev, data.message];
+            });
+          }
+        } catch (_e) {}
+      };
+      ws.onerror = () => {
+        // aguardar fechamento para reconectar
+      };
+      ws.onclose = () => {
+        if (killed) return;
+        attempts += 1;
+        const delay = Math.min(1000 * Math.pow(2, attempts), 10000);
+        setTimeout(connect, delay);
+      };
     };
-    return () => { try { ws.close(); } catch (_e) {} };
+  
+    connect();
+  
+    return () => {
+      killed = true;
+      try { ws?.close(); } catch (_e) {}
+    };
   }, [user, conversation.id]);
 
   // Removido canal realtime do Supabase
