@@ -49,6 +49,12 @@ export default {
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+      },
+      fontFamily: {
+        ui: ['Inter', 'ui-sans-serif', 'system-ui'],
+        menu: ['Poppins', 'ui-sans-serif', 'system-ui'],
+        buttons: ['Montserrat', 'ui-sans-serif', 'system-ui'],
+        heading: ['Oswald', 'ui-sans-serif', 'system-ui'],
       }
     },
   },

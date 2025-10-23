@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -24,12 +24,18 @@ const navItems = [
 
 const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    // Collapse sidebar automatically on route change
+    setIsCollapsed(true);
+  }, [location.pathname]);
 
   return (
     <motion.div
       animate={{ width: isCollapsed ? 80 : 280 }}
       transition={{ duration: 0.3, ease: 'easeInOut' }}
-      className="relative flex flex-col h-full bg-card border-r text-foreground"
+      className="relative flex flex-col h-full bg-card border-r text-foreground font-menu"
     >
       <div className="flex items-center justify-center p-4 h-[65px] border-b">
         <Command className="text-primary h-8 w-8" />
@@ -40,7 +46,7 @@ const Sidebar: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, delay: 0.1 }}
-              className="font-bold text-xl ml-3"
+              className="font-bold text-xl ml-3 font-menu"
             >
               Chatvendas
             </motion.span>
@@ -70,7 +76,7 @@ const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-4 font-medium"
+                  className="ml-4 font-medium font-menu"
                 >
                   {item.label}
                 </motion.span>

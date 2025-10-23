@@ -32,13 +32,13 @@ const Dashboard: React.FC = () => {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <div className="lg:col-span-5 p-4 rounded-lg glassmorphism">
-          <h3 className="text-lg font-semibold mb-4 flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary" /> Visão Geral de Atendimentos</h3>
+          <h3 className="text-lg font-semibold uppercase tracking-wide font-heading mb-4 flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary" /> Visão Geral de Atendimentos</h3>
           <div className="h-[350px]">
             <OverviewChart />
           </div>
         </div>
         <div className="lg:col-span-2 p-4 rounded-lg glassmorphism">
-          <h3 className="text-lg font-semibold mb-4 flex items-center"><TrendingUp className="mr-2 h-5 w-5 text-primary" /> Canais de Atendimento</h3>
+          <h3 className="text-lg font-semibold uppercase tracking-wide font-heading mb-4 flex items-center"><TrendingUp className="mr-2 h-5 w-5 text-primary" /> Canais de Atendimento</h3>
           <div className="h-[350px]">
             <ChannelsChart />
           </div>
@@ -46,7 +46,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="p-4 rounded-lg glassmorphism">
-        <h3 className="text-lg font-semibold mb-4 flex items-center"><Users className="mr-2 h-5 w-5 text-primary" /> Atendimentos Recentes</h3>
+        <h3 className="text-lg font-semibold uppercase tracking-wide font-heading mb-4 flex items-center"><Users className="mr-2 h-5 w-5 text-primary" /> Atendimentos Recentes</h3>
         <RecentActivity />
       </div>
     </div>
