@@ -209,9 +209,15 @@ export default function Connections() {
       const createPayload: any = {
         instanceName: newConnectionName,
         qrcode: false,
+        integration: 'WHATSAPP-BAILEYS',
+        rejectCall: true,
+        readMessages: true,
+        readStatus: true,
         webhook: {
           url: finalWebhookUrl,
-          webhookByEvents: true,
+          byEvents: true,
+          base64: false,
+          headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
           events: [
             "APPLICATION_STARTUP", "QRCODE_UPDATED", "MESSAGES_SET", "MESSAGES_UPSERT",
             "MESSAGES_UPDATE", "SEND_MESSAGE", "CONTACTS_SET", "CONTACTS_UPSERT",
@@ -219,15 +225,7 @@ export default function Connections() {
             "CHATS_UPDATE", "CHATS_DELETE", "GROUPS_UPSERT", "GROUPS_UPDATE",
             "GROUP_PARTICIPANTS_UPDATE", "CONNECTION_UPDATE",
           ],
-          headers: { 'x-user-id': user.id },
         },
-        settings: {
-          "reject_call": "true",
-          "messages_read": "read",
-          "webhook_by_events": true,
-          "webhook_base64": false
-        },
-        integration: 'whatsapp-web.js'
       };
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
