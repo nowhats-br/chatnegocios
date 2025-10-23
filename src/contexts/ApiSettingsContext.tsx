@@ -21,39 +21,35 @@ const ApiSettingsContext = createContext<ApiSettingsContextType>({
 
 export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const envApiUrl = import.meta.env.VITE_EVOLUTION_API_URL as string | undefined;
-  const envApiKey = import.meta.env.VITE_EVOLUTION_API_KEY as string | undefined;
-  const [apiUrl, setApiUrl] = useState<string | null>(envApiUrl || null);
-  const [apiKey, setApiKey] = useState<string | null>(envApiKey || null);
+  const [apiUrl, setApiUrl] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = useCallback(async () => {
     if (!user) {
-      // Fallback localStorage/env mesmo sem usuário
-      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
-      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
-      setApiUrl(localUrl || envApiUrl || null);
-      setApiKey(localKey || envApiKey || null);
       setLoading(false);
+      setApiUrl(null);
+      setApiKey(null);
       return;
     }
+    
     setLoading(true);
     try {
+      await dbClient.profiles.ensureExists();
       const data = await dbClient.profiles.get(user.id);
-      // Fallback: se backend não tem perfil, usar localStorage, depois .env
-      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
-      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
-      setApiUrl(data.evolution_api_url || localUrl || envApiUrl || null);
-      setApiKey(data.evolution_api_key || localKey || envApiKey || null);
+      
+      setApiUrl(data.evolution_api_url || null);
+      setApiKey(data.evolution_api_key || null);
+
     } catch (error: any) {
-      // 404 sem perfil: usar localStorage/env
-      const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
-      const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
-      setApiUrl(localUrl || envApiUrl || null);
-      setApiKey(localKey || envApiKey || null);
+      toast.error("Erro ao carregar configurações da API", { description: error.message });
+      setApiUrl(null);
+      setApiKey(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [user]);
+
 
   useEffect(() => {
     fetchSettings();
@@ -68,14 +64,10 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.update(user.id, newApiUrl, newApiKey);
       setApiUrl(newApiUrl);
       setApiKey(newApiKey);
-      // Persistência local para evitar perda em reinícios do backend
-      try {
-        localStorage.setItem('evolution_api_url', newApiUrl);
-        localStorage.setItem('evolution_api_key', newApiKey);
-      } catch (_) {}
       toast.success("Configurações da API salvas com sucesso!");
     } catch (error: any) {
       toast.error("Erro ao salvar configurações", { description: error.message });
+      throw error;
     }
   };
 

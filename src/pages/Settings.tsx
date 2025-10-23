@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import Card, { CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import React, { useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
@@ -7,7 +7,7 @@ import { useApiSettings } from '@/contexts/ApiSettingsContext';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 
 const settingsSchema = z.object({
@@ -23,17 +23,6 @@ const Settings: React.FC = () => {
     resolver: zodResolver(settingsSchema),
   });
 
-  const [checking, setChecking] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<{
-    available: boolean;
-    currentSha: string;
-    latestSha: string;
-    latestMessage: string;
-    latestDate: string;
-    branch: string;
-  } | null>(null);
-
   useEffect(() => {
     if (!loading) {
       reset({
@@ -45,19 +34,6 @@ const Settings: React.FC = () => {
 
   const onSubmit = async (data: SettingsFormData) => {
     await updateSettings(data.apiUrl, data.apiKey);
-  };
-
-  const handleCheckUpdates = async () => {
-    setChecking(true);
-    setUpdateError(null);
-    try {
-      const info = await dbClient.system.updateCheck();
-      setUpdateInfo(info);
-    } catch (err: any) {
-      setUpdateError(err?.message || 'Falha ao verificar atualizações.');
-    } finally {
-      setChecking(false);
-    }
   };
 
   return (
@@ -112,43 +88,7 @@ const Settings: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Button onClick={handleCheckUpdates} disabled={checking}>
-                {checking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Verificar atualizações
-              </Button>
-              {updateInfo && (
-                updateInfo.available ? (
-                  <span className="inline-flex items-center text-amber-600">
-                    <AlertCircle className="mr-1 h-4 w-4" />
-                    Atualização disponível
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center text-green-600">
-                    <CheckCircle2 className="mr-1 h-4 w-4" />
-                    Sistema está atualizado
-                  </span>
-                )
-              )}
-            </div>
-
-            {updateError && (
-              <p className="text-sm text-red-600">{updateError}</p>
-            )}
-
-            {updateInfo && (
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p><strong>Branch:</strong> {updateInfo.branch}</p>
-                <p><strong>Commit atual:</strong> {updateInfo.currentSha}</p>
-                <p><strong>Último commit remoto:</strong> {updateInfo.latestSha}</p>
-                {updateInfo.latestMessage && <p><strong>Mensagem:</strong> {updateInfo.latestMessage}</p>}
-                {updateInfo.latestDate && <p><strong>Data:</strong> {updateInfo.latestDate}</p>}
-              </div>
-            )}
-
-            {!updateInfo && !checking && (
-              <p className="text-sm text-muted-foreground">A funcionalidade de atualização via UI foi desabilitada nesta versão. Para atualizar, use os comandos `git pull` no servidor.</p>
-            )}
+             <p className="text-sm text-muted-foreground">A funcionalidade de atualização via UI foi desabilitada nesta versão. Para atualizar, use os comandos `git pull` no servidor.</p>
           </div>
         </CardContent>
       </Card>

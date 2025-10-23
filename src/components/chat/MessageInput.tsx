@@ -29,8 +29,8 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage, onQuickRespo
   };
 
   return (
-    <div className="p-4 bg-card border-t">
-      <form onSubmit={handleSubmit} className="flex items-center bg-secondary rounded-lg px-3">
+    <div className="p-4 bg-card/60 backdrop-blur-sm border-t">
+      <form onSubmit={handleSubmit} className="flex items-center bg-secondary rounded-lg px-2 py-1">
         <Button type="button" variant="ghost" size="icon"><Smile className="h-5 w-5 text-muted-foreground"/></Button>
         
         <Button type="button" variant="ghost" size="icon" onClick={onQuickResponseClick}>
@@ -64,7 +64,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage, onQuickRespo
           }}
         />
         <Button type="button" variant="ghost" size="icon"><Mic className="h-5 w-5 text-muted-foreground"/></Button>
-        <Button type="submit" variant="default" size="icon" className="ml-2" disabled={!text.trim()}>
+        <Button type="submit" size="icon" className="ml-2 bg-primary hover:bg-primary/90 rounded-full" disabled={!text.trim()}>
           <Send className="h-5 w-5"/>
         </Button>
       </form>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Card, { CardContent } from '@/components/ui/Card';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Tabs, TabsTrigger } from '@/components/ui/Tabs';
 import { ShoppingBag, User, MessageCircle, Users, Tag, List, Users2 } from 'lucide-react';
 import ProductManager from '@/components/registrations/ProductManager';

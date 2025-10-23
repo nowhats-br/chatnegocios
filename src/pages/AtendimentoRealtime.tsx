@@ -7,7 +7,7 @@ import ConversationList from '@/components/chat/ConversationList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import { useEvolutionMessaging, SendTextResult, SendMediaResult } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
-import placeholderChat from '/placeholder-chat.svg';
+import { MessageSquareDashed } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const AtendimentoRealtime: React.FC = () => {
@@ -36,11 +36,9 @@ const AtendimentoRealtime: React.FC = () => {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Supabase Realtime para atualizações
   useEffect(() => {
     if (!user) return;
 
-    // Remove canal anterior se existir
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
@@ -50,16 +48,13 @@ const AtendimentoRealtime: React.FC = () => {
     
     channel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${user.id}` }, 
-        (payload) => {
-          console.log('Conversation change received!', payload);
-          fetchConversations(); // Simplesmente recarrega tudo ao receber qualquer evento
+        () => {
+          fetchConversations();
         }
       )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `user_id=eq.${user.id}` }, 
         (payload) => {
-          console.log('New message received!', payload);
           const newMessage = payload.new as TMessage;
-          // Atualiza a conversa para aparecer no topo
           setConversations(prev => {
             const convIndex = prev.findIndex(c => c.id === newMessage.conversation_id);
             if (convIndex > -1) {
@@ -114,7 +109,6 @@ const AtendimentoRealtime: React.FC = () => {
       return false;
     }
 
-    // Busca dados da conexão para envio via API
     const { data: connection, error: connError } = await supabase
         .from('connections')
         .select('instance_name')
@@ -207,8 +201,7 @@ const AtendimentoRealtime: React.FC = () => {
       setConversations(prev => prev.map(c => c.id === conversation.id ? updated : c));
       setActiveConversation(updated);
       setActiveFilter('active');
-    } catch (error: any) {
-      toast.error("Erro ao abrir ticket", { description: error.message });
+    } catch (error: any) {      toast.error("Erro ao abrir ticket", { description: error.message });
     }
   };
 
@@ -217,7 +210,7 @@ const AtendimentoRealtime: React.FC = () => {
     .sort((a,b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
   return (
-    <div className="flex h-[calc(100vh-110px)] bg-card border rounded-lg overflow-hidden">
+    <div className="flex h-[calc(100vh-110px)] bg-card border rounded-lg overflow-hidden shadow-lg">
       <ConversationList
         conversations={filteredConversations}
         activeConversationId={activeConversation?.id}
@@ -228,7 +221,7 @@ const AtendimentoRealtime: React.FC = () => {
         onFilterChange={setActiveFilter}
       />
 
-      <div className="flex-1 flex flex-col bg-chat-bg dark:bg-chat-bg-dark">
+      <div className="flex-1 flex flex-col bg-secondary/50">
         {activeConversation ? (
           <ChatWindow
             key={activeConversation.id}
@@ -239,7 +232,7 @@ const AtendimentoRealtime: React.FC = () => {
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
-            <img src={placeholderChat} alt="Selecione uma conversa" className="w-64 h-64" />
+            <MessageSquareDashed className="w-24 h-24 text-muted-foreground/50" />
             <h2 className="mt-6 text-xl font-semibold text-foreground">Nenhuma conversa selecionada</h2>
             <p className="mt-2 text-muted-foreground">Selecione uma conversa na lista à esquerda para começar a atender.</p>
           </div>

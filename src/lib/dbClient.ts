@@ -47,6 +47,12 @@ export const dbClient = {
       const { error } = await supabase.from('profiles').upsert({ id: userId, evolution_api_url, evolution_api_key });
       if (error) throw error;
     },
+    async ensureExists() {
+      const { error } = await supabase.rpc('ensure_profile_exists');
+      if (error) {
+          console.error("Error ensuring profile exists:", error);
+      }
+    },
   },
   connections: {
     async list(): Promise<Connection[]> {

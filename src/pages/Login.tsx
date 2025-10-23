@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
-import { Loader2, BotMessageSquare } from 'lucide-react';
+import { Loader2, Command } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { dbClient } from '@/lib/dbClient';
 import { useAuth } from '@/contexts/AuthContext';
+import { AnimatePresence, motion } from 'framer-motion';
 
 type AuthMode = 'signIn' | 'signUp';
 
@@ -33,7 +34,7 @@ const Login: React.FC = () => {
       } else {
         await dbClient.auth.register(email, password);
         toast.success('Cadastro realizado!', {
-          description: 'Sua conta foi criada com sucesso. Por favor, verifique seu e-mail para confirmar e depois faça login.',
+          description: 'Sua conta foi criada. Verifique seu e-mail para confirmar e depois faça login.',
         });
         setMode('signIn');
         setPassword('');
@@ -49,20 +50,35 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-secondary/50">
-      <div className="w-full max-w-md p-8 space-y-8 bg-card rounded-lg shadow-lg">
+    <div className="flex items-center justify-center min-h-screen bg-background dark:bg-grid-small-white/[0.2] bg-grid-small-black/[0.2]">
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md p-8 space-y-8 glassmorphism rounded-xl shadow-2xl"
+      >
         <div className="text-center">
-            <BotMessageSquare className="mx-auto h-12 w-12 text-primary" />
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">
-              {mode === 'signIn' ? 'Bem-vindo de volta!' : 'Crie sua conta'}
-            </h1>
-            <p className="mt-2 text-muted-foreground">
-              {mode === 'signIn' ? 'Faça login para acessar o Chatvendas.' : 'Comece a gerenciar seus atendimentos.'}
-            </p>
+            <Command className="mx-auto h-12 w-12 text-primary" />
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={mode}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+              >
+                <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">
+                  {mode === 'signIn' ? 'Bem-vindo de volta!' : 'Crie sua conta'}
+                </h1>
+                <p className="mt-2 text-muted-foreground">
+                  {mode === 'signIn' ? 'Faça login para acessar o Chatvendas.' : 'Comece a gerenciar seus atendimentos.'}
+                </p>
+              </motion.div>
+            </AnimatePresence>
         </div>
         <form className="space-y-6" onSubmit={handleAuth}>
           <div>
-            <label htmlFor="email" className="text-sm font-medium">E-mail</label>
+            <label htmlFor="email" className="text-sm font-medium text-muted-foreground">E-mail</label>
             <Input
               id="email"
               type="email"
@@ -70,11 +86,11 @@ const Login: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="seu@email.com"
-              className="mt-1"
+              className="mt-1 bg-secondary/50 border-border/50"
             />
           </div>
           <div>
-            <label htmlFor="password">Senha</label>
+            <label htmlFor="password" className="text-sm font-medium text-muted-foreground">Senha</label>
             <Input
               id="password"
               type="password"
@@ -82,10 +98,10 @@ const Login: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               required
               placeholder="••••••••"
-              className="mt-1"
+              className="mt-1 bg-secondary/50 border-border/50"
             />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full !mt-8" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {mode === 'signIn' ? 'Entrar' : 'Cadastrar'}
           </Button>
@@ -96,7 +112,7 @@ const Login: React.FC = () => {
             {mode === 'signIn' ? 'Cadastre-se' : 'Faça login'}
           </Button>
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 };

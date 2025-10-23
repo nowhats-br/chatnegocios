@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
@@ -12,7 +12,7 @@ import { useEvolutionApi } from '@/hooks/useEvolutionApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_ENDPOINTS } from '@/lib/apiEndpoints';
 import AlertDialog from '@/components/ui/AlertDialog';
-import { EvolutionInstanceCreateRequest, EvolutionInstanceCreateResponse, STATUS_CONFIG } from '@/types/evolution-api';
+import { EvolutionInstanceCreateResponse, STATUS_CONFIG } from '@/types/evolution-api';
 import { supabase } from '@/lib/supabase';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 
@@ -151,7 +151,6 @@ export default function Connections() {
     let finalWebhookUrl = webhookUrlEnv;
     if (!finalWebhookUrl) {
       if (backendUrl) {
-        // Garante que a URL base não tenha uma barra no final e o path comece com uma
         const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
         finalWebhookUrl = `${baseUrl}/api/whatsapp/webhook`;
       } else {
@@ -166,7 +165,7 @@ export default function Connections() {
     }
     
     try {
-      const createPayload: EvolutionInstanceCreateRequest = {
+      const createPayload: any = {
         instanceName: newConnectionName,
         qrcode: true,
         webhook: {
@@ -181,6 +180,13 @@ export default function Connections() {
           ],
           headers: { 'x-user-id': user.id },
         },
+        settings: {
+          "reject_call": "true",
+          "messages_read": "read",
+          "webhook_by_events": true,
+          "webhook_base64": false
+        },
+        integration: 'whatsapp-web.js'
       };
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {

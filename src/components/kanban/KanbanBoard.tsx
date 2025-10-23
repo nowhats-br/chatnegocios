@@ -14,13 +14,7 @@ import {
 import { dbClient } from '@/lib/dbClient';
 import { toast } from 'sonner';
 import { Conversation, ConversationStatus } from '@/types/database';
-// @ts-ignore
 import { Loader2 } from 'lucide-react';
-
-
-
-
-
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 

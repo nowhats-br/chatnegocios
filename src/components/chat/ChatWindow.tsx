@@ -162,8 +162,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         await supabase.from('messages').delete().eq('conversation_id', conversation.id);
         await supabase.from('conversations').delete().eq('id', conversation.id);
         toast.success("Conversa e mensagens foram excluídas.");
-        // A atualização da lista de conversas será tratada pela subscription na página pai.
-        // Aqui, apenas fechamos o modal.
         setAlertOpen(false);
     } catch (error: any) {
         toast.error("Erro ao excluir conversa", { description: error.message });
@@ -198,7 +196,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
 
   return (
     <>
-      <div className="flex items-center justify-between p-3 bg-card border-b">
+      <div className="flex items-center justify-between p-3 bg-card/80 backdrop-blur-sm border-b">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
             <User className="h-5 w-5 text-muted-foreground" />
@@ -230,7 +228,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
                     <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5"/></Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                    <DropdownMenuItem className="text-red-500" onSelect={() => setAlertOpen(true)}>
+                    <DropdownMenuItem className="text-red-500 focus:text-red-500 focus:bg-red-500/10" onSelect={() => setAlertOpen(true)}>
                         <Trash2 className="mr-2 h-4 w-4" /> Excluir Conversa
                     </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -244,9 +242,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         ) : (
             messages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.sender_is_user ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`rounded-lg p-3 max-w-lg shadow-sm ${msg.sender_is_user ? 'bg-whatsapp-dark text-white' : 'bg-card'}`}>
+                    <div className={`rounded-lg p-3 max-w-lg shadow-sm ${msg.sender_is_user ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>
                         {renderMessageContent(msg)}
-                        <p className={`text-xs text-right mt-1 ${msg.sender_is_user ? 'text-gray-300' : 'text-muted-foreground'}`}>
+                        <p className={`text-xs text-right mt-1 ${msg.sender_is_user ? 'text-gray-300 dark:text-gray-400' : 'text-muted-foreground'}`}>
                             {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                     </div>
