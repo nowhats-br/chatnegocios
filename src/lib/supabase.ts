@@ -1,27 +1,11 @@
-// Stub seguro para evitar erro "supabaseUrl is required".
-// Este projeto migrou para backend Express + Postgre/APIs.
-// Qualquer uso desta referência deve ser substituído por dbClient e endpoints REST.
+import { createClient } from '@supabase/supabase-js'
+import { Database } from '@/types/supabase'
 
-function throwRemoved(feature: string) {
-  throw new Error(`Supabase removido: substitua chamadas (${feature}) pelo backend/REST`);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Supabase URL and Anon Key must be defined in .env file");
 }
 
-export const supabase: any = {
-  from: () => ({
-    select: () => throwRemoved('from().select'),
-    insert: () => throwRemoved('from().insert'),
-    update: () => throwRemoved('from().update'),
-    delete: () => throwRemoved('from().delete'),
-    eq: () => throwRemoved('from().eq'),
-    order: () => throwRemoved('from().order'),
-    single: () => throwRemoved('from().single'),
-  }),
-  storage: {
-    from: () => ({
-      upload: () => throwRemoved('storage.from().upload'),
-      getPublicUrl: () => throwRemoved('storage.from().getPublicUrl'),
-    }),
-  },
-  channel: () => ({ subscribe: () => throwRemoved('realtime channel') }),
-  removeChannel: () => {},
-};
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)

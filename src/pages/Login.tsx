@@ -15,7 +15,12 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { refresh } = useAuth();
+  const { user } = useAuth();
+
+  if (user) {
+    navigate('/');
+    return null;
+  }
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,15 +28,12 @@ const Login: React.FC = () => {
 
     try {
       if (mode === 'signIn') {
-        const { token, user } = await dbClient.auth.login(email, password);
-        localStorage.setItem('auth_token', token);
-        localStorage.setItem('auth_user', JSON.stringify(user));
-        await refresh();
+        await dbClient.auth.login(email, password);
         navigate('/');
       } else {
         await dbClient.auth.register(email, password);
         toast.success('Cadastro realizado!', {
-          description: 'Sua conta foi criada com sucesso. Agora faça login.',
+          description: 'Sua conta foi criada com sucesso. Por favor, verifique seu e-mail para confirmar e depois faça login.',
         });
         setMode('signIn');
         setPassword('');

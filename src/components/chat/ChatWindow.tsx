@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { dbClient } from '@/lib/dbClient';
+import { supabase } from '@/lib/supabase';
 import { Conversation } from '@/types/database';
 type QuickResponse = {
   id: string;
@@ -8,44 +8,50 @@ type QuickResponse = {
 };
 import { Message } from '@/types/chat';
 import { toast } from 'sonner';
-import { User, MoreVertical, Loader2, FileText, Download } from 'lucide-react';
+import { User, MoreVertical, Loader2, FileText, Download, CheckCircle, Share2, Trash2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import MessageInput from './MessageInput';
 import { useAuth } from '@/contexts/AuthContext';
 import Popover from '../ui/Popover';
+import { dbClient } from '@/lib/dbClient';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/DropdownMenu';
+import AlertDialog from '../ui/AlertDialog';
 
 type ConversationWithContact = Conversation & {
   contacts: {
     name: string | null;
     avatar_url: string | null;
+    phone_number: string;
   } | null;
 };
 
 interface ChatWindowProps {
   conversation: ConversationWithContact;
-  onSendMessage: (content: string) => Promise<void>;
-  onSendAttachment: (file: File) => Promise<void>;
-  headerActions?: React.ReactNode;
+  onSendMessage: (content: string) => Promise<boolean>;
+  onSendAttachment: (file: File) => Promise<boolean>;
+  onResolveConversation: () => void;
 }
 
-const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, onSendAttachment, headerActions }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, onSendAttachment, onResolveConversation }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [isQuickResponseOpen, setQuickResponseOpen] = useState(false);
   const [quickResponses, setQuickResponses] = useState<QuickResponse[]>([]);
   const [messageText, setMessageText] = useState('');
+  const [isAlertOpen, setAlertOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (behavior: 'smooth' | 'auto' = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   const fetchMessages = useCallback(async (conversationId: string) => {
     setLoading(true);
     try {
       const data = await dbClient.messages.listByConversation(conversationId);
-      setMessages(data as Message[]);
+      setMessages(data);
     } catch (error: any) {
       toast.error('Erro ao buscar mensagens', { description: error.message });
       setMessages([]);
@@ -57,7 +63,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
   const fetchQuickResponses = useCallback(async () => {
     try {
       const data = await dbClient.quickResponses.list();
-      setQuickResponses(data as QuickResponse[]);
+      setQuickResponses(data);
     } catch (_e) {
       toast.error('Erro ao buscar mensagens rápidas.');
     }
@@ -70,59 +76,32 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
   }, [conversation.id, fetchMessages]);
 
   useEffect(() => {
-    scrollToBottom();
+    scrollToBottom('auto');
   }, [messages]);
 
-  // WebSocket: escutar novas mensagens para a conversa ativa
+  // Supabase Realtime para novas mensagens
   useEffect(() => {
-    if (!user || !conversation?.id) return;
-    const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
-    const wsSchemeBase = apiBase.startsWith('https') ? apiBase.replace(/^https/, 'wss') : apiBase.replace(/^http/, 'ws');
-    const wsUrl = `${wsSchemeBase}/ws?user_id=${encodeURIComponent(user.id)}`;
-  
-    let killed = false;
-    let attempts = 0;
-    let ws: WebSocket | null = null;
-  
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        attempts = 0;
-      };
-      ws.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          if (data?.type === 'message_new' && data.message?.conversation_id === conversation.id) {
-            setMessages(prev => {
-              const exists = prev.some(m => m.id === data.message.id);
-              return exists ? prev : [...prev, data.message];
-            });
-          }
-        } catch (_e) {}
-      };
-      ws.onerror = () => {
-        // aguardar fechamento para reconectar
-      };
-      ws.onclose = () => {
-        if (killed) return;
-        attempts += 1;
-        const delay = Math.min(1000 * Math.pow(2, attempts), 10000);
-        setTimeout(connect, delay);
-      };
-    };
-  
-    connect();
-  
-    return () => {
-      killed = true;
-      try { ws?.close(); } catch (_e) {}
-    };
-  }, [user, conversation.id]);
+    if (!conversation.id) return;
 
-  // Removido canal realtime do Supabase
+    const channel = supabase
+      .channel(`public:messages:conversation_id=eq.${conversation.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversation.id}` },
+        (payload) => {
+          setMessages(prev => {
+            const exists = prev.some(m => m.id === payload.new.id);
+            return exists ? prev : [...prev, payload.new as Message];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversation.id]);
 
   const handleLocalSendMessage = async (content: string) => {
-    if (!user) return;
+    if (!user || !content.trim()) return;
     
     const tempId = `temp-${Date.now()}`;
     const optimisticMessage: Message = {
@@ -135,10 +114,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         user_id: user.id
     };
     setMessages(prev => [...prev, optimisticMessage]);
+    setMessageText('');
 
-    await onSendMessage(content);
-    // Sincroniza mensagens com backend
-    fetchMessages(String(conversation.id));
+    const success = await onSendMessage(content);
+    if (!success) {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        setMessageText(content);
+    }
   };
 
   const handleFileSelect = async (file: File) => {
@@ -156,9 +138,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     };
     setMessages(prev => [...prev, optimisticMessage]);
 
-    await onSendAttachment(file);
-    // Sincroniza mensagens com backend
-    fetchMessages(String(conversation.id));
+    const success = await onSendAttachment(file);
+    if (!success) {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
   }
 
   const handleQuickResponseClick = () => {
@@ -173,6 +156,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     setQuickResponseOpen(false);
   }
 
+  const confirmDeleteConversation = async () => {
+    setIsDeleting(true);
+    try {
+        await supabase.from('messages').delete().eq('conversation_id', conversation.id);
+        await supabase.from('conversations').delete().eq('id', conversation.id);
+        toast.success("Conversa e mensagens foram excluídas.");
+        // A atualização da lista de conversas será tratada pela subscription na página pai.
+        // Aqui, apenas fechamos o modal.
+        setAlertOpen(false);
+    } catch (error: any) {
+        toast.error("Erro ao excluir conversa", { description: error.message });
+    } finally {
+        setIsDeleting(false);
+    }
+  };
+
   const renderMessageContent = (msg: Message) => {
     switch (msg.message_type) {
       case 'image':
@@ -186,14 +185,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
           <a href={msg.content || ''} target="_blank" rel="noopener noreferrer" className="flex items-center space-x-3 p-3 bg-black/10 rounded-lg hover:bg-black/20">
             <FileText className="h-8 w-8" />
             <div className="flex-1">
-              <p className="font-medium break-all">{msg.content?.split('/').pop()}</p>
+              <p className="font-medium break-all">{msg.content?.split('/').pop()?.split('?')[0] || 'arquivo'}</p>
               <p className="text-xs">Clique para baixar</p>
             </div>
             <Download className="h-5 w-5" />
           </a>
         );
       default:
-        return <p>{msg.content}</p>;
+        return <p className="whitespace-pre-wrap">{msg.content}</p>;
     }
   }
 
@@ -206,12 +205,36 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
           </div>
           <div>
             <p className="font-semibold">{conversation.contacts?.name || 'Desconhecido'}</p>
-            <p className="text-xs text-green-500">online</p>
+            <p className="text-xs text-muted-foreground">{conversation.contacts?.phone_number}</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          {headerActions}
-          <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5"/></Button>
+            <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => toast.info('Função em desenvolvimento', { description: 'A transferência de conversas estará disponível em breve.'})}
+            >
+                <Share2 className="mr-2 h-4 w-4"/> Transferir
+            </Button>
+            <Button 
+                variant="default" 
+                size="sm" 
+                onClick={onResolveConversation}
+                disabled={conversation.status === 'resolved'}
+            >
+                <CheckCircle className="mr-2 h-4 w-4"/> 
+                {conversation.status === 'resolved' ? 'Resolvido' : 'Resolver'}
+            </Button>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5"/></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                    <DropdownMenuItem className="text-red-500" onSelect={() => setAlertOpen(true)}>
+                        <Trash2 className="mr-2 h-4 w-4" /> Excluir Conversa
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
         </div>
       </div>
 
@@ -221,7 +244,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         ) : (
             messages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.sender_is_user ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`rounded-lg p-3 max-w-lg ${msg.sender_is_user ? 'bg-whatsapp-dark text-white' : 'bg-card'}`}>
+                    <div className={`rounded-lg p-3 max-w-lg shadow-sm ${msg.sender_is_user ? 'bg-whatsapp-dark text-white' : 'bg-card'}`}>
                         {renderMessageContent(msg)}
                         <p className={`text-xs text-right mt-1 ${msg.sender_is_user ? 'text-gray-300' : 'text-muted-foreground'}`}>
                             {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -264,6 +287,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
             </div>
         </Popover>
       </div>
+      <AlertDialog
+        isOpen={isAlertOpen}
+        onClose={() => setAlertOpen(false)}
+        onConfirm={confirmDeleteConversation}
+        title="Excluir Conversa?"
+        description="Esta ação é irreversível e irá apagar todas as mensagens desta conversa permanentemente."
+        confirmText="Excluir"
+        isConfirming={isDeleting}
+      />
     </>
   );
 };

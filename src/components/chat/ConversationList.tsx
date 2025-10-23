@@ -26,12 +26,20 @@ const ConversationList: React.FC<ConversationListProps> = ({
 }) => {
 
   const filters: { label: string; value: ConversationStatus }[] = [
-    { label: 'Aberto', value: 'active' },
     { label: 'Pendentes', value: 'pending' },
-    { label: 'Resolvido', value: 'resolved' },
+    { label: 'Ativas', value: 'active' },
+    { label: 'Resolvidas', value: 'resolved' },
   ];
 
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredConversations = conversations.filter(convo => {
+    const contactName = convo.contacts?.name?.toLowerCase() || '';
+    const contactPhone = convo.contacts?.phone_number || '';
+    const search = searchTerm.toLowerCase();
+    return contactName.includes(search) || contactPhone.includes(search);
+  });
 
   return (
     <div className="w-full md:w-[380px] border-r flex flex-col bg-card">
@@ -40,7 +48,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar ou começar uma nova conversa"
+            placeholder="Buscar por nome ou telefone"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 rounded-lg bg-secondary border border-transparent focus:bg-background focus:border-primary focus:outline-none"
           />
         </div>
@@ -60,14 +70,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-        ) : conversations.length === 0 ? (
+        ) : filteredConversations.length === 0 ? (
             <div className="text-center py-10 px-4">
               <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
               <h3 className="mt-4 text-lg font-medium">Nenhuma conversa encontrada</h3>
-              <p className="mt-1 text-sm text-muted-foreground">Não há conversas com o status "{activeFilter}".</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {searchTerm ? `Nenhum resultado para "${searchTerm}".` : `Não há conversas com o status "${activeFilter}".`}
+              </p>
             </div>
         ) : (
-          conversations.map(convo => (
+          filteredConversations.map(convo => (
             <div
               key={convo.id}
               onClick={() => onSelectConversation(convo)}
@@ -87,7 +99,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <p className="font-semibold truncate">{convo.contacts?.name || 'Desconhecido'}</p>
+                  <p className="font-semibold truncate">{convo.contacts?.name || convo.contacts?.phone_number || 'Desconhecido'}</p>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <p className="text-xs text-muted-foreground">{new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
                     {convo.status === 'pending' && (

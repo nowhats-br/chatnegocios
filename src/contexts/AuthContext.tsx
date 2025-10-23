@@ -1,70 +1,73 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { dbClient } from '@/lib/dbClient';
+import { supabase } from '@/lib/supabase';
+import { AuthSession } from '@supabase/supabase-js';
 
-interface AuthContextType {
-  user: { id: string; email: string } | null;
-  loading: boolean;
-  logout: () => Promise<void>;
-  refresh: () => Promise<void>;
+interface User {
+  id: string;
+  email?: string;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, loading: true, logout: async () => {}, refresh: async () => {} });
+interface AuthContextType {
+  session: AuthSession | null;
+  user: User | null;
+  loading: boolean;
+  logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType>({ session: null, user: null, loading: true, logout: async () => {} });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let mounted = true;
-    const init = async () => {
-      try {
-        const { user } = await dbClient.auth.me();
-        if (!mounted) return;
-        setUser(user ?? null);
-      } catch (_e) {
-        setUser(null);
-      } finally {
-        if (mounted) setLoading(false);
+    const setData = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("Error getting session:", error);
+      } else {
+        setSession(session);
+        setUser(session?.user ?? null);
       }
+      setLoading(false);
     };
-    init();
-    return () => { mounted = false; };
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    setData();
+
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
   }, []);
 
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const { user } = await dbClient.auth.me();
-      setUser(user ?? null);
-    } catch (_e) {
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+  const logout = async () => {
+    await supabase.auth.signOut();
   };
 
-  const logout = async () => {
-    try {
-      await dbClient.auth.logout();
-    } catch (_) {
-      // swallow errors; ensure local state is cleared
-    }
-    try {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-    } catch (_) {}
-    setUser(null);
-    setLoading(false);
+  const value = {
+    session,
+    user,
+    loading,
+    logout,
   };
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout, refresh }}>
-      {children}
+    <AuthContext.Provider value={value}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };
 
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
