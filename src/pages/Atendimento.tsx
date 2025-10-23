@@ -8,7 +8,7 @@ import Button from '@/components/ui/Button';
 import { useEvolutionMessaging } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
 import { CheckCircle } from 'lucide-react';
-import type { MessageType } from '@/types/chat';
+import type { MessageType } from '@/types/database';
 
 const Atendimento: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
