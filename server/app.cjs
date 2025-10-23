@@ -959,88 +959,115 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         // manter ownerUserId pelo fallback
       }
     }
-    const phone = String(payload.from || payload.phone || '').replace(/\D/g, '');
-    const content = String(payload.message || payload.text || '');
-    const messageType = payload.type === 'image' ? 'image' : (payload.type === 'file' ? 'file' : 'text');
 
-    if (!phone || !content) {
-      return res.status(400).json({ error: 'Payload inválido: requer phone/from e message/text' });
-    }
-
-    // Garantir contato
-    let contactId;
-    {
-      const { rows } = await asyncQuery('select id from contacts where user_id=$1 and phone_number=$2', [ownerUserId, phone]);
-      if (rows[0]) {
-        contactId = rows[0].id;
-      } else {
-        const { rows: inserted } = await asyncQuery(
-          'insert into contacts (user_id, phone_number, name, avatar_url) values ($1,$2,$3,$4) returning id',
-          [ownerUserId, phone, payload.name || null, payload.avatar_url || null]
-        );
-        contactId = inserted[0].id;
+    const eventType = String(payload.event || payload.type || '').toLowerCase();
+    if (eventType === 'messages.upsert' || Array.isArray(payload?.messages) || Array.isArray(payload?.data?.messages)) {
+      const msgs = Array.isArray(payload?.messages)
+        ? payload.messages
+        : (Array.isArray(payload?.data?.messages) ? payload.data.messages : []);
+      if (!Array.isArray(msgs) || msgs.length === 0) {
+        return res.status(400).json({ error: 'Payload inválido: nenhuma mensagem em messages.upsert' });
       }
-    }
-
-    // Obter conexão
-    let connectionId = null;
-    if (instanceName) {
-      const { rows } = await asyncQuery('select id from connections where instance_name=$1', [instanceName]);
-      connectionId = rows[0]?.id || null;
-    }
-
-    // Conversa: obter ou criar (pendente)
-    let conversationId;
-    {
-      const { rows } = await asyncQuery(
-        'select id, status from conversations where user_id=$1 and contact_id=$2 order by created_at desc limit 1',
-        [ownerUserId, contactId]
-      );
-      const existing = rows[0];
-      if (!existing || (existing.status && existing.status.toLowerCase() === 'resolved')) {
-        conversationId = `conv_${Date.now()}`;
-        await asyncQuery(
-          'insert into conversations (id, user_id, contact_id, connection_id, status) values ($1,$2,$3,$4,$5)',
-          [conversationId, ownerUserId, contactId, connectionId, 'pending']
-        );
-      } else {
-        conversationId = existing.id;
-        const newStatus = existing.status && existing.status.toLowerCase() !== 'active' ? 'pending' : existing.status;
-        await asyncQuery('update conversations set status=$2, updated_at=now() where id=$1', [conversationId, newStatus]);
+      let connectionId = null;
+      if (instanceName) {
+        const { rows } = await asyncQuery('select id from connections where instance_name=$1', [instanceName]);
+        connectionId = rows[0]?.id || null;
       }
+      const results = [];
+      for (const m of msgs) {
+        const key = m?.key || {};
+        const remoteJid = key?.remoteJid || m?.remoteJid || '';
+        if (!remoteJid || /@g\.us$/i.test(remoteJid)) continue; // ignora grupos
+        const phone = String(remoteJid).replace(/\D/g, '');
+        const msg = m?.message || {};
+        const text = msg?.conversation
+          || msg?.extendedTextMessage?.text
+          || msg?.imageMessage?.caption
+          || msg?.videoMessage?.caption
+          || msg?.documentMessage?.caption
+          || msg?.audioMessage?.caption
+          || '';
+        if (!phone || !text) continue;
+        let messageType = 'text';
+        if (msg?.imageMessage) messageType = 'image';
+        else if (msg?.videoMessage) messageType = 'video';
+        else if (msg?.documentMessage) messageType = 'file';
+        else if (msg?.audioMessage) messageType = 'audio';
+        const messageId = key?.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+
+        let contactId;
+        {
+          const { rows } = await asyncQuery('select id from contacts where user_id=$1 and phone_number=$2', [ownerUserId, phone]);
+          if (rows[0]) {
+            contactId = rows[0].id;
+          } else {
+            const { rows: inserted } = await asyncQuery(
+              'insert into contacts (user_id, phone_number, name, avatar_url) values ($1,$2,$3,$4) returning id',
+              [ownerUserId, phone, m?.pushName || null, null]
+            );
+            contactId = inserted[0].id;
+          }
+        }
+
+        let conversationId;
+        {
+          const { rows } = await asyncQuery(
+            'select id, status from conversations where user_id=$1 and contact_id=$2 order by created_at desc limit 1',
+            [ownerUserId, contactId]
+          );
+          const existing = rows[0];
+          if (!existing || (existing.status && existing.status.toLowerCase() === 'resolved')) {
+            conversationId = `conv_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+            await asyncQuery(
+              'insert into conversations (id, user_id, contact_id, connection_id, status) values ($1,$2,$3,$4,$5)',
+              [conversationId, ownerUserId, contactId, connectionId, 'pending']
+            );
+          } else {
+            conversationId = existing.id;
+            const newStatus = existing.status && existing.status.toLowerCase() !== 'active' ? 'pending' : existing.status;
+            await asyncQuery('update conversations set status=$2, updated_at=now() where id=$1', [conversationId, newStatus]);
+          }
+        }
+
+        const { rows: dup } = await asyncQuery('select id from messages where id=$1', [messageId]);
+        if (!dup[0]) {
+          await asyncQuery(
+            'insert into messages (id, conversation_id, sender_is_user, content, message_type, user_id) values ($1,$2,$3,$4,$5,$6)',
+            [messageId, conversationId, false, text, messageType, ownerUserId]
+          );
+
+          const { rows: convRows } = await asyncQuery(
+            "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+            [conversationId]
+          );
+          let conversationWithContact = convRows[0];
+          if (conversationWithContact) {
+            const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conversationWithContact;
+            conversationWithContact = {
+              ...rest,
+              contacts: {
+                name: contact_name || null,
+                avatar_url: contact_avatar_url || null,
+                phone_number: contact_phone_number || null,
+              },
+            };
+          }
+
+          const { rows: msgRows } = await asyncQuery('select * from messages where id=$1', [messageId]);
+          const messageRow = msgRows[0];
+
+          broadcastToUser(ownerUserId, { type: 'conversation_upsert', conversation: conversationWithContact });
+          broadcastToUser(ownerUserId, { type: 'message_new', message: messageRow });
+        }
+
+        results.push({ conversation_id: conversationId, contact_id: contactId, message_id: messageId, phone });
+      }
+
+      return res.json({ ok: true, count: results.length, items: results });
     }
-
-    // Registrar mensagem
-    const messageId = `msg_${Date.now()}`;
-    await asyncQuery(
-      'insert into messages (id, conversation_id, sender_is_user, content, message_type, user_id) values ($1,$2,$3,$4,$5,$6)',
-      [messageId, conversationId, false, content, messageType, ownerUserId]
-    );
-
-    // Buscar conversa com contato para broadcast (webhook)
-    const { rows: convRows } = await asyncQuery(
-      "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
-      [conversationId]
-    );
-    let conversationWithContact = convRows[0];
-    if (conversationWithContact) {
-      const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conversationWithContact;
-      conversationWithContact = {
-        ...rest,
-        contacts: {
-          name: contact_name || null,
-          avatar_url: contact_avatar_url || null,
-          phone_number: contact_phone_number || null,
-        },
-      };
-    }
-
-    // Buscar mensagem para broadcast
-    const { rows: msgRows } = await asyncQuery('select * from messages where id=$1', [messageId]);
-    const messageRow = msgRows[0];
 
     // Emitir eventos em tempo real
-    broadcastToUser(ownerUserId, { type: 'conversation_upsert', conversation: conversationWithContact });
+    broadcastToUser(ownerUserId, { type: 'conversation_upsert', conversation: conv });
     broadcastToUser(ownerUserId, { type: 'message_new', message: messageRow });
 
     res.json({ ok: true, conversation_id: conversationId, contact_id: contactId, message_id: messageId });

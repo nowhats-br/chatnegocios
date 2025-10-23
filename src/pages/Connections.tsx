@@ -87,6 +87,39 @@ export default function Connections() {
   const connectedNotifiedRef = useRef<Record<string, boolean>>({});
   const disconnectLockRef = useRef<Record<string, boolean>>({});
 
+  const enforceWebhookConfig = useCallback(async (instanceName: string) => {
+    const url = webhookUrlEnv || `${window.location.origin}/api/whatsapp/webhook`;
+    const payload = {
+      webhook: {
+        url,
+        byEvents: true,
+        base64: false,
+        events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+        headers: { 'x-user-id': user?.id || '' },
+      },
+    };
+    const candidates: Array<{ endpoint: string; method: 'POST' | 'PUT' | 'PATCH' }> = [
+      { endpoint: `/instance/update/${instanceName}`, method: 'POST' },
+      { endpoint: `/instance/webhook/${instanceName}`, method: 'POST' },
+      { endpoint: `/instances/update/${instanceName}`, method: 'POST' },
+      { endpoint: `/whatsapp/instance/update/${instanceName}`, method: 'POST' },
+      { endpoint: `/instance/${instanceName}/webhook`, method: 'POST' },
+    ];
+    for (const c of candidates) {
+      try {
+        await evolutionApiRequest<any>(c.endpoint, {
+          method: c.method,
+          body: JSON.stringify(payload),
+          suppressToast: true,
+          suppressInfoToast: true,
+        });
+        return true;
+      } catch (_) {
+        // tenta próximo
+      }
+    }
+    return false;
+  }, [evolutionApiRequest, webhookUrlEnv, user?.id]);
   const fetchQrDataWithFallback = async (instanceName: string) => {
     const candidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
       // Template configurável via .env (ex.: /instance/qrCode/{instanceName})
@@ -241,6 +274,10 @@ export default function Connections() {
       setIsConnecting(true);
       // Libera qualquer bloqueio de reconexão ao iniciar conexão manualmente
       disconnectLockRef.current[connection.instance_name] = false;
+
+      try {
+        await enforceWebhookConfig(connection.instance_name);
+      } catch (_) {}
 
       // Tenta iniciar a conexão nas rotas conhecidas
       const connectCandidates: Array<{ endpoint: string; method: 'GET' | 'POST' }> = [
