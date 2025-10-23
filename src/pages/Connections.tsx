@@ -78,40 +78,54 @@ export default function Connections() {
 
   useEffect(() => {
     if (!isQrModalOpen || !selectedConnection) return;
-    const updated = connections.find(c => c.id === selectedConnection.id);
-    if (!updated) return;
-    setSelectedConnection(updated);
-    const uiStatus = normalizeStatus(updated.status);
-    if (uiStatus === 'connected') {
-      setIsQrModalOpen(false);
-      setQrCodeData('');
-      setQrValue('');
-      setPairingCode('');
-      toast.success('Conectado com sucesso.');
-      // Após conectar, buscar número e foto do perfil e persistir
-      (async () => {
-        try {
-          const statusRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(updated.instance_name), { method: 'GET', suppressToast: true });
-          const owner: string | undefined = statusRes?.owner || statusRes?.instance?.owner || statusRes?.instances?.[0]?.owner || (updated.instance_data as any)?.owner;
-          const phoneNumber = owner ? owner.split('@')[0] : undefined;
-          let profilePictureUrl: string | undefined = (updated.instance_data as any)?.profilePictureUrl;
-          if (phoneNumber && !profilePictureUrl) {
-            const picRes = await evolutionApiRequest<any>(API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(updated.instance_name), {
-              method: 'POST',
-              body: JSON.stringify({ number: phoneNumber }),
-              suppressToast: true,
-            });
-            profilePictureUrl = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const statusRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(selectedConnection.instance_name), { method: 'GET', suppressToast: true });
+        const stateRaw = statusRes?.state || statusRes?.status || statusRes?.connectionState || statusRes?.instance?.state;
+        const stateUpper = String(stateRaw || '').toUpperCase();
+        const isConnected = ['CONNECTED', 'OPEN', 'ONLINE'].includes(stateUpper);
+
+        if (isConnected) {
+          setIsQrModalOpen(false);
+          setQrCodeData('');
+          setQrValue('');
+          setPairingCode('');
+
+          // Sincroniza perfil e persiste status
+          try {
+            const owner: string | undefined = statusRes?.owner || statusRes?.instance?.owner || statusRes?.instances?.[0]?.owner || (selectedConnection.instance_data as any)?.owner;
+            const phoneNumber = owner ? owner.split('@')[0] : undefined;
+            let profilePictureUrl: string | undefined = (selectedConnection.instance_data as any)?.profilePictureUrl;
+            if (phoneNumber && !profilePictureUrl) {
+              const picRes = await evolutionApiRequest<any>(API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name), {
+                method: 'POST',
+                body: JSON.stringify({ number: phoneNumber }),
+                suppressToast: true,
+              });
+              profilePictureUrl = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
+            }
+            const merged = { ...(selectedConnection.instance_data as any), owner, number: phoneNumber, profilePictureUrl };
+            const saved = await dbClient.connections.update(selectedConnection.id, { status: 'CONNECTED', instance_data: merged });
+            setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
+          } catch (e) {
+            console.warn('Falha ao sincronizar perfil após conexão:', (e as any).message);
           }
-          const merged = { ...(updated.instance_data as any), owner, number: phoneNumber, profilePictureUrl };
-          const saved = await dbClient.connections.update(updated.id, { instance_data: merged });
-          setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
-        } catch (e) {
-          console.warn('Falha ao sincronizar perfil do WhatsApp:', (e as any).message);
+
+          toast.success('Conectado com sucesso.');
+          return; // encerra polling
         }
-      })();
-    }
-  }, [connections, isQrModalOpen, selectedConnection]);
+      } catch (err) {
+        // Ignora erros intermitentes de polling
+      }
+
+      if (!cancelled) setTimeout(poll, 2000);
+    };
+
+    poll();
+    return () => { cancelled = true; };
+  }, [isQrModalOpen, selectedConnection]);
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
@@ -270,6 +284,8 @@ export default function Connections() {
       }).catch(e => console.warn("Falha ao deletar na API Evolution, prosseguindo com a exclusão local:", e.message));
 
       await dbClient.connections.delete(selectedConnection.id);
+      // Atualiza a UI imediatamente, sem depender do canal em tempo real
+      setConnections(prev => prev.filter(c => c.id !== selectedConnection.id));
       
       toast.success('Instância excluída com sucesso.');
       setIsDeleteDialogOpen(false);
