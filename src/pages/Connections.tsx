@@ -181,6 +181,17 @@ export default function Connections() {
               setQrCodeData('');
               setPairingCode('');
             }
+            // Dispara sincronização inicial de conversas assim que a conexão ficar CONNECTED
+            const alreadySynced = !!connectedNotifiedRef.current[connection.id];
+            if (!alreadySynced) {
+              try {
+                toast.info('Sincronizando últimas conversas...');
+                await dbClient.evolution.syncChats({ connection_id: connection.id, limit: 10 });
+                connectedNotifiedRef.current[connection.id] = true;
+              } catch (e: any) {
+                toast.error('Erro ao sincronizar conversas', { description: e.message });
+              }
+            }
           }
         }
       }
@@ -491,6 +502,17 @@ export default function Connections() {
             setQrCodeData('');
             setPairingCode('');
             await fetchConnections();
+            // Sincroniza conversas imediatamente após conexão
+            const alreadySynced = !!connectedNotifiedRef.current[connection.id];
+            if (!alreadySynced) {
+              try {
+                toast.info('Sincronizando últimas conversas...');
+                await dbClient.evolution.syncChats({ connection_id: connection.id, limit: 10 });
+                connectedNotifiedRef.current[connection.id] = true;
+              } catch (e: any) {
+                toast.error('Erro ao sincronizar conversas', { description: e.message });
+              }
+            }
           } catch (e: any) {
             toast.error('Erro ao atualizar status para conectado', { description: e.message });
           } finally {

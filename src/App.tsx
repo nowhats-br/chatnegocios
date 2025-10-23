@@ -2,7 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import Connections from './pages/Connections';
-import Chat from './pages/Chat';
+import Atendimento from './pages/Atendimento';
 import Kanban from './pages/Kanban';
 import Settings from './pages/Settings';
 import Registrations from './pages/Registrations';
@@ -30,7 +30,7 @@ function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/conexoes" element={<Connections />} />
-              <Route path="/chat" element={<Chat />} />
+              <Route path="/chat" element={<Atendimento />} />
               <Route path="/kanban" element={<Kanban />} />
               <Route path="/cadastros" element={<Registrations />} />
               <Route path="/configuracoes" element={<Settings />} />

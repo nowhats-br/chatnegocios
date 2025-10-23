@@ -173,6 +173,14 @@ export const dbClient = {
       });
     },
   },
+  evolution: {
+    async syncChats(payload: { connection_id?: number | string; instance_name?: string; limit?: number }) {
+      return await http<{ ok: boolean; count: number; items: Array<{ conversation_id: string; phone: string }> }>(`/api/evolution/syncChats`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+  },
   system: {
     async updateCheck() {
       return await http<{ available: boolean; currentSha: string; latestSha: string; latestMessage: string; latestDate: string; branch: string }>(`/system/update/check`);

@@ -790,6 +790,157 @@ app.get('/api/whatsapp/webhook', async (_req, res) => {
   res.json({ ok: true, status: 'alive' });
 });
 
+// Sincronizar últimas conversas da Evolution (após conexão QR)
+app.post('/api/evolution/syncChats', async (req, res) => {
+  try {
+    const { connection_id, instance_name, limit } = req.body || {};
+    const targetLimit = Number(limit) > 0 && Number(limit) <= 50 ? Number(limit) : 10;
+
+    // Resolver conexão e proprietário
+    let instanceName = String(instance_name || '').trim();
+    let ownerUserId = null;
+    let connectionId = null;
+    if (!instanceName && connection_id != null) {
+      const { rows } = await asyncQuery('select id, user_id, instance_name from connections where id=$1', [connection_id]);
+      const row = rows && rows[0];
+      if (!row) return res.status(404).json({ error: 'Conexão não encontrada' });
+      instanceName = String(row.instance_name);
+      ownerUserId = String(row.user_id);
+      connectionId = row.id;
+    } else if (instanceName) {
+      const { rows } = await asyncQuery('select id, user_id from connections where instance_name=$1 limit 1', [instanceName]);
+      const row = rows && rows[0];
+      if (row) {
+        ownerUserId = String(row.user_id);
+        connectionId = row.id;
+      }
+    }
+    if (!instanceName) return res.status(400).json({ error: 'instance_name é obrigatório (ou forneça connection_id)' });
+
+    // Evolução: obter URL e API key do perfil, com fallback para env
+    async function resolveEvolutionSettings(userId) {
+      let baseUrl = process.env.EVOLUTION_API_URL || null;
+      let apiKey = process.env.EVOLUTION_API_KEY || null;
+      if (userId) {
+        try {
+          const { rows } = await asyncQuery('select evolution_api_url, evolution_api_key from profiles where id=$1', [String(userId)]);
+          if (rows && rows[0]) {
+            baseUrl = rows[0].evolution_api_url || baseUrl;
+            apiKey = rows[0].evolution_api_key || apiKey;
+          }
+        } catch (_) {}
+      }
+      return { baseUrl, apiKey };
+    }
+    const { baseUrl, apiKey } = await resolveEvolutionSettings(ownerUserId);
+    if (!baseUrl || !apiKey) return res.status(400).json({ error: 'Evolution API não configurada (url/apikey)' });
+
+    // Buscar conversas via Evolution
+    let evoChatsResp;
+    try {
+      evoChatsResp = await evoRequestJson(baseUrl, `/chat/findChats/${instanceName}`, apiKey, 'GET');
+    } catch (e) {
+      // Fallbacks possíveis
+      try {
+        evoChatsResp = await evoRequestJson(baseUrl, `/chat/findChats?instance=${encodeURIComponent(instanceName)}`, apiKey, 'GET');
+      } catch (e2) {
+        return res.status(502).json({ error: `Falha ao consultar Evolution: ${e2?.message || String(e2)}` });
+      }
+    }
+    const chats = (Array.isArray(evoChatsResp?.data) ? evoChatsResp.data : (Array.isArray(evoChatsResp?.chats) ? evoChatsResp.chats : (Array.isArray(evoChatsResp) ? evoChatsResp : []))) || [];
+    const sliced = chats.slice(0, targetLimit);
+
+    function extractPhoneFromJid(remoteJid) {
+      if (!remoteJid || typeof remoteJid !== 'string') return null;
+      // ignora grupos e broadcasts
+      if (remoteJid.includes('@g.us') || remoteJid.includes('broadcast')) return null;
+      const match = remoteJid.match(/\d+/g);
+      const digits = match ? match.join('') : '';
+      return digits || null;
+    }
+
+    const createdOrUpdated = [];
+    for (const c of sliced) {
+      const remoteJid = c?.remoteJid || c?.id || c?.jid || c?.chatId || (c?.key ? c.key.remoteJid : null) || (c?.id && c.id._serialized ? c.id._serialized : null);
+      const phone = extractPhoneFromJid(String(remoteJid || ''));
+      if (!phone) continue;
+
+      // Garantir contato
+      let contactId;
+      {
+        const { rows } = await asyncQuery('select id from contacts where user_id=$1 and phone_number=$2', [ownerUserId || (process.env.DEFAULT_USER_ID || 'system'), phone]);
+        if (rows[0]) {
+          contactId = rows[0].id;
+        } else {
+          const displayName = c?.name || c?.formattedTitle || c?.pushName || null;
+          const { rows: inserted } = await asyncQuery(
+            'insert into contacts (user_id, phone_number, name, avatar_url) values ($1,$2,$3,$4) returning id',
+            [ownerUserId || (process.env.DEFAULT_USER_ID || 'system'), phone, displayName, null]
+          );
+          contactId = inserted[0].id;
+        }
+      }
+
+      // Conversa: obter ou criar e atualizar updated_at
+      let conversationId;
+      {
+        const { rows } = await asyncQuery(
+          'select id, status, user_id from conversations where user_id=$1 and contact_id=$2 order by created_at desc limit 1',
+          [ownerUserId || (process.env.DEFAULT_USER_ID || 'system'), contactId]
+        );
+        const existing = rows[0];
+        if (!existing) {
+          conversationId = `conv_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+          await asyncQuery(
+            'insert into conversations (id, user_id, contact_id, connection_id, status) values ($1,$2,$3,$4,$5)',
+            [conversationId, ownerUserId || (process.env.DEFAULT_USER_ID || 'system'), contactId, connectionId || null, 'pending']
+          );
+        } else {
+          conversationId = existing.id;
+          await asyncQuery('update conversations set updated_at=now() where id=$1', [conversationId]);
+        }
+      }
+
+      // Se disponível, registrar última mensagem como histórico inicial
+      try {
+        const lastText = c?.lastMessage?.message?.conversation || c?.lastText || c?.text || null;
+        if (lastText) {
+          const messageId = `msg_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+          await asyncQuery(
+            'insert into messages (id, conversation_id, sender_is_user, content, message_type, user_id) values ($1,$2,$3,$4,$5,$6)',
+            [messageId, conversationId, false, String(lastText), 'text', ownerUserId || (process.env.DEFAULT_USER_ID || 'system')]
+          );
+        }
+      } catch (_) {}
+
+      // Buscar conversa com contato para broadcast
+      const { rows: convRows } = await asyncQuery(
+        "select c.*, ct.name as contact_name, ct.avatar_url as contact_avatar_url, ct.phone_number as contact_phone_number from conversations c left join contacts ct on ct.id=c.contact_id where c.id=$1",
+        [conversationId]
+      );
+      let conv = convRows[0];
+      if (conv) {
+        const { contact_name, contact_avatar_url, contact_phone_number, ...rest } = conv;
+        conv = {
+          ...rest,
+          contacts: {
+            name: contact_name || null,
+            avatar_url: contact_avatar_url || null,
+            phone_number: contact_phone_number || null,
+          },
+        };
+        broadcastToUser(ownerUserId || (process.env.DEFAULT_USER_ID || 'system'), { type: 'conversation_upsert', conversation: conv });
+      }
+      createdOrUpdated.push({ conversation_id: conversationId, phone });
+    }
+
+    res.json({ ok: true, count: createdOrUpdated.length, items: createdOrUpdated });
+  } catch (e) {
+    console.error('[syncChats] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/whatsapp/webhook', async (req, res) => {
   try {
     const payload = req.body || {};
