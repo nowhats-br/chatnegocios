@@ -1,4 +1,4 @@
-const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3001` : '');
+const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) || (typeof window !== 'undefined' ? window.location.origin : '');
 
 async function http<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;

@@ -56,7 +56,7 @@ const AtendimentoRealtime: React.FC = () => {
   // WebSocket para atualizações em tempo real
   useEffect(() => {
     if (!user) return;
-    const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
+    const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
     const wsSchemeBase = apiBase.startsWith('https') ? apiBase.replace(/^https/, 'wss') : apiBase.replace(/^http/, 'ws');
     const wsUrl = `${wsSchemeBase}/ws?user_id=${encodeURIComponent(user.id)}`;
 
