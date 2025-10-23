@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Conversation, ConversationStatus, MessageType } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
@@ -16,6 +16,7 @@ const AtendimentoRealtime: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
   const { sendText, sendMedia } = useEvolutionMessaging();
   const { user } = useAuth();
+  const didSyncRef = useRef(false);
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -65,7 +66,13 @@ const AtendimentoRealtime: React.FC = () => {
 
     const connect = () => {
       ws = new WebSocket(wsUrl);
-      ws.onopen = () => { attempts = 0; };
+      ws.onopen = () => { 
+        attempts = 0; 
+        if (!didSyncRef.current) {
+          syncWithEvolution();
+          didSyncRef.current = true;
+        }
+      };
       ws.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data);
@@ -227,9 +234,7 @@ const AtendimentoRealtime: React.FC = () => {
       <div className="flex-1 flex flex-col bg-chat-bg dark:bg-chat-bg-dark">
         <div className="flex items-center justify-between p-3 bg-card border-b">
           <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={syncWithEvolution}>
-              <RefreshCw className="mr-2 h-4 w-4"/> Sincronizar Evolution
-            </Button>
+            {/* Removido botão de sincronização manual; sincronização ocorre automaticamente no onopen do WebSocket */}
           </div>
           <div className="flex items-center space-x-2">
             {activeConversation && (
