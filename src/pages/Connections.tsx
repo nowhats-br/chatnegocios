@@ -148,9 +148,19 @@ export default function Connections() {
     }
     setIsCreating(true);
 
-    const webhookUrl = webhookUrlEnv || (backendUrl ? `${backendUrl}/whatsapp/webhook` : `${window.location.origin}/api/whatsapp/webhook`);
-    if (!webhookUrl) {
-      toast.error("Configuração Incompleta", { description: "A URL do backend (VITE_BACKEND_URL) não está definida no seu arquivo .env. Esta URL é necessária para configurar o webhook." });
+    let finalWebhookUrl = webhookUrlEnv;
+    if (!finalWebhookUrl) {
+      if (backendUrl) {
+        // Garante que a URL base não tenha uma barra no final e o path comece com uma
+        const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+        finalWebhookUrl = `${baseUrl}/api/whatsapp/webhook`;
+      } else {
+        finalWebhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
+      }
+    }
+
+    if (!finalWebhookUrl) {
+      toast.error("Configuração Incompleta", { description: "A URL do webhook não pôde ser determinada. Verifique VITE_BACKEND_URL ou VITE_EVOLUTION_WEBHOOK_URL no seu arquivo .env." });
       setIsCreating(false);
       return;
     }
@@ -160,7 +170,7 @@ export default function Connections() {
         instanceName: newConnectionName,
         qrcode: true,
         webhook: {
-          url: webhookUrl,
+          url: finalWebhookUrl,
           webhookByEvents: true,
           events: [
             "APPLICATION_STARTUP", "QRCODE_UPDATED", "MESSAGES_SET", "MESSAGES_UPSERT",
@@ -179,8 +189,8 @@ export default function Connections() {
         suppressToast: true,
       });
 
-      if (!creationResponse) {
-        throw new Error("A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.");
+      if (!creationResponse || (creationResponse.status === 'error' && creationResponse.message)) {
+        throw new Error(creationResponse?.message || "A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.");
       }
 
       await dbClient.connections.create({

@@ -7,10 +7,16 @@ const path = require('path');
 
 dotenv.config();
 
+// Verificação Crítica de Variáveis de Ambiente
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('\x1b[31m[FATAL]\x1b[0m Variáveis de ambiente do Supabase (SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY) não estão definidas. O backend não pode iniciar.');
+  process.exit(1);
+}
+
 const PORT = process.env.PORT || 3001;
 const app = express();
 
-// CORS
+// Configuração de CORS
 const defaultOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
@@ -18,7 +24,7 @@ const defaultOrigins = [
   'http://127.0.0.1:4173',
 ];
 const envOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-const allowedOrigins = [...defaultOrigins, ...envOrigins];
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])]; // Garante origens únicas
 
 const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
   ? { origin: true, credentials: true }
@@ -27,6 +33,7 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
+          console.warn(`[CORS] Bloqueada origem não permitida: ${origin}`);
           callback(new Error('Not allowed by CORS'));
         }
       },
@@ -37,19 +44,14 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(bodyParser.json({ limit: '10mb' }));
 
-// Supabase Admin Client
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Cliente Admin do Supabase
+const supabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('[FATAL] Variáveis de ambiente do Supabase (URL e SERVICE_ROLE_KEY) não estão definidas.');
-  process.exit(1);
-}
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-// Servir frontend
+// Servir o frontend buildado
 const distPath = path.join(__dirname, '..', 'dist');
-app.use(express.static(distPath));
+if (require('fs').existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, status: 'alive', timestamp: new Date().toISOString() });
@@ -110,14 +112,16 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         const { data: contact, error: contactError } = await supabaseAdmin
           .from('contacts')
           .upsert({ user_id: ownerUserId, phone_number: phone, name: pushName }, { onConflict: 'user_id, phone_number' })
-          .select()
+          .select('id')
           .single();
         if (contactError) throw new Error(`Erro ao salvar contato: ${contactError.message}`);
 
+        const { data: connection } = await supabaseAdmin.from('connections').select('id').eq('instance_name', instanceName).eq('user_id', ownerUserId).single();
+
         const { data: conversation, error: convError } = await supabaseAdmin
           .from('conversations')
-          .upsert({ user_id: ownerUserId, contact_id: contact.id, status: 'pending', connection_id: payload.connection_id }, { onConflict: 'user_id, contact_id' })
-          .select()
+          .upsert({ user_id: ownerUserId, contact_id: contact.id, status: 'pending', connection_id: connection?.id || null }, { onConflict: 'user_id, contact_id' })
+          .select('id')
           .single();
         if (convError) throw new Error(`Erro ao salvar conversa: ${convError.message}`);
 
@@ -129,7 +133,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           content: messageContent,
           message_type: 'text',
         });
-        if (msgError && msgError.code !== '23505') {
+        if (msgError && msgError.code !== '23505') { // Ignora erro de ID duplicado
           console.error(`[Webhook] Erro ao inserir mensagem ${key.id}:`, msgError.message);
         }
       }
@@ -137,16 +141,22 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     res.status(200).json({ ok: true });
   } catch (e) {
-    console.error('[Webhook] Erro fatal no processamento:', e.message);
-    res.status(500).json({ error: e.message });
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error('[Webhook] Erro fatal no processamento:', errorMessage);
+    res.status(500).json({ error: errorMessage });
   }
 });
 
+// Rota fallback para servir o index.html em rotas de frontend
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
-  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  if (require('fs').existsSync(distPath)) {
+    res.sendFile(path.join(distPath, 'index.html'));
+  } else {
+    res.status(404).send('Frontend não buildado. Execute `npm run build`.');
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend (webhook) server running on http://localhost:${PORT}`);
+  console.log(`\x1b[32m[OK]\x1b[0m Backend (webhook) server rodando em http://localhost:${PORT}`);
 });
