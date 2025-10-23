@@ -1,22 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Conversation, ConversationStatus } from '@/types/database';
+import { Conversation, ConversationStatus, MessageType } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
 import ConversationList from '@/components/chat/ConversationList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import Button from '@/components/ui/Button';
 import { useEvolutionMessaging } from '@/hooks/useEvolutionMessaging';
 import { useAuth } from '@/contexts/AuthContext';
-import { CheckCircle } from 'lucide-react';
-import type { MessageType } from '@/types/database';
+import { CheckCircle, RefreshCw } from 'lucide-react';
 
-const Atendimento: React.FC = () => {
+const AtendimentoRealtime: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
   const { sendText, sendMedia } = useEvolutionMessaging();
   const { user } = useAuth();
-  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -30,11 +29,30 @@ const Atendimento: React.FC = () => {
     }
   }, []);
 
+  const syncWithEvolution = useCallback(async () => {
+    try {
+      const connections = await dbClient.connections.list();
+      const connected = (connections || []).find((c: any) => String(c.status).toUpperCase() === 'CONNECTED');
+      if (!connected) {
+        toast.warning('Nenhuma conexão Evolution está ativa. Vá em Conexões e conecte.');
+        return;
+      }
+      const instanceName = String(connected.instance_name);
+      const r = await dbClient.evolution.syncChats({ instance_name: instanceName, limit: 20 });
+      if (r?.ok) {
+        toast.success(`Sincronizadas ${r.count} conversas da Evolution`);
+        await fetchConversations();
+      }
+    } catch (error: any) {
+      toast.error('Falha ao sincronizar conversas com Evolution', { description: error.message });
+    }
+  }, [fetchConversations]);
+
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
 
-  // WebSocket para atualizações de conversas em tempo real
+  // WebSocket para atualizações em tempo real
   useEffect(() => {
     if (!user) return;
     const apiBase = (import.meta.env.VITE_BACKEND_URL as string) || `${window.location.protocol}//${window.location.hostname}:3001`;
@@ -64,7 +82,15 @@ const Atendimento: React.FC = () => {
             });
           } else if (data?.type === 'message_new' && data.message) {
             const msg = data.message as { conversation_id: string };
-            setConversations(prev => prev.map(c => c.id === msg.conversation_id ? { ...c, updated_at: new Date().toISOString() } : c));
+            setConversations(prev => {
+              const exists = prev.some(c => c.id === msg.conversation_id);
+              const next = prev.map(c => c.id === msg.conversation_id ? { ...c, updated_at: new Date().toISOString(), status: c.status === 'resolved' ? 'pending' : c.status } : c);
+              if (!exists) {
+                // Se a conversa não existe localmente, tentar sincronizar rapidamente
+                syncWithEvolution();
+              }
+              return next;
+            });
           }
         } catch (_e) {}
       };
@@ -83,7 +109,8 @@ const Atendimento: React.FC = () => {
       killed = true;
       try { ws?.close(); } catch (_e) {}
     };
-  }, [user]);
+  }, [user, syncWithEvolution]);
+
 
   const sendMessage = async (content: string, type: MessageType, fileName?: string) => {
     if (!activeConversation || !user) {
@@ -91,7 +118,6 @@ const Atendimento: React.FC = () => {
       return;
     }
 
-    // Persistir mensagem no banco
     try {
       await dbClient.messages.create({
         conversation_id: activeConversation.id,
@@ -105,7 +131,6 @@ const Atendimento: React.FC = () => {
       return;
     }
 
-    // Enviar via Evolution
     if (!activeConversation.connection_id || !activeConversation.contacts?.phone_number) {
       toast.error('Dados da conversa incompletos para envio.');
       return;
@@ -149,14 +174,13 @@ const Atendimento: React.FC = () => {
     }
 
     if (!sendOk) {
-      toast.error('Falha ao enviar mensagem via API', { description: sendError });
+      toast.error('Falha ao enviar mensagem via API Evolution', { description: sendError });
     }
   };
 
   const handleSendAttachment = async (file: File) => {
     if (!user) return;
     const toastId = toast.loading('Enviando anexo...');
-
     try {
       const reader = new FileReader();
       reader.onload = async () => {
@@ -186,18 +210,6 @@ const Atendimento: React.FC = () => {
     }
   };
 
-  const handleOpenTicket = async (convo: Conversation) => {
-    try {
-      await dbClient.conversations.update(convo.id, { status: 'active' });
-      toast.success('Ticket aberto!');
-      setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'active' } : c));
-      setActiveConversation({ ...convo, status: 'active' });
-      setActiveFilter('active');
-    } catch (error: any) {
-      toast.error('Erro ao abrir ticket', { description: error.message });
-    }
-  };
-
   const filteredConversations = conversations.filter(c => c.status === activeFilter);
 
   return (
@@ -206,32 +218,38 @@ const Atendimento: React.FC = () => {
         conversations={filteredConversations}
         activeConversationId={activeConversation?.id}
         onSelectConversation={setActiveConversation}
-        onOpenTicket={handleOpenTicket}
+        onOpenTicket={async () => { /* tickets já são gerados como pendente via webhook */ }}
         loading={loading}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
       />
 
       <div className="flex-1 flex flex-col bg-chat-bg dark:bg-chat-bg-dark">
+        <div className="flex items-center justify-between p-3 bg-card border-b">
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" size="sm" onClick={syncWithEvolution}>
+              <RefreshCw className="mr-2 h-4 w-4"/> Sincronizar Evolution
+            </Button>
+          </div>
+          <div className="flex items-center space-x-2">
+            {activeConversation && (
+              <Button variant="outline" size="sm" onClick={handleResolveConversation}>
+                <CheckCircle className="mr-2 h-4 w-4"/> Resolver
+              </Button>
+            )}
+          </div>
+        </div>
+
         {activeConversation ? (
           <ChatWindow
             key={activeConversation.id}
-            conversation={activeConversation}
+            conversation={activeConversation as any}
             onSendMessage={(content) => sendMessage(content, 'text')}
             onSendAttachment={handleSendAttachment}
-            headerActions={
-              <div className="flex items-center space-x-2">
-                <Button variant="outline" size="sm" onClick={handleResolveConversation}>
-                  <CheckCircle className="mr-2 h-4 w-4"/> Resolver
-                </Button>
-              </div>
-            }
           />
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <img src="/placeholder-chat.svg" alt="Selecione uma conversa" className="w-64 h-64" />
-            <h2 className="mt-4 text-2xl font-semibold">Selecione uma conversa</h2>
-            <p className="text-muted-foreground">Escolha um dos seus contatos para começar a conversar.</p>
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-muted-foreground">Selecione uma conversa pendente para atender.</p>
           </div>
         )}
       </div>
@@ -239,4 +257,4 @@ const Atendimento: React.FC = () => {
   );
 };
 
-export default Atendimento;
+export default AtendimentoRealtime;
