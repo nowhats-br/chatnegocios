@@ -946,6 +946,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log('[Webhook] Recebido:', JSON.stringify(payload));
 
+    const instanceName = payload.instance_name || payload.instance || null;
     let ownerUserId = String(payload.user_id || req.headers['x-user-id'] || process.env.DEFAULT_USER_ID || 'system');
     // Se a instância estiver associada a uma conexão, usar o dono dessa conexão
     if (instanceName) {
@@ -961,7 +962,6 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const phone = String(payload.from || payload.phone || '').replace(/\D/g, '');
     const content = String(payload.message || payload.text || '');
     const messageType = payload.type === 'image' ? 'image' : (payload.type === 'file' ? 'file' : 'text');
-    const instanceName = payload.instance_name || payload.instance || null;
 
     if (!phone || !content) {
       return res.status(400).json({ error: 'Payload inválido: requer phone/from e message/text' });
