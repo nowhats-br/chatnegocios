@@ -264,10 +264,11 @@ export default function Connections() {
     try {
       const createPayload: any = {
         instanceName: newConnectionName,
-        qrcode: false,
+        qrcode: true,
         webhook: {
           url: finalWebhookUrl,
           webhookByEvents: true,
+          webhookBase64: false,
           events: [
             'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_UPSERT',
             'MESSAGES_UPDATE', 'SEND_MESSAGE', 'CONTACTS_SET', 'CONTACTS_UPSERT',
@@ -277,13 +278,15 @@ export default function Connections() {
           ],
           headers: { 'x-user-id': user.id },
         },
+        // Compatibilidade com variantes v1 que usam webhookUrl no nível raiz
+        webhookUrl: finalWebhookUrl,
         settings: {
           reject_call: 'true',
           messages_read: 'read',
           webhook_by_events: true,
           webhook_base64: false,
         },
-        integration: 'whatsapp-web.js',
+        // Removido integration para máxima compatibilidade com v1
       };
 
       // Tenta múltiplos endpoints de criação para compatibilidade com diferentes versões da Evolution API

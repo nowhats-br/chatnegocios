@@ -14,16 +14,16 @@ export const API_ENDPOINTS = {
   INSTANCE_CONNECT: (instanceName: string) => `/instance/connect/${instanceName}`,
   
   /**
-   * Endpoint to get the QR code for a specific instance.
+   * Endpoint to get the QR code for a specific instance (fallback reuses connect).
    * @param instanceName The name of the WhatsApp instance.
    */
-  INSTANCE_QR_CODE: (instanceName: string) => `/instance/qrCode/${instanceName}`,
+  INSTANCE_QR_CODE: (instanceName: string) => `/instance/connect/${instanceName}`,
 
   /**
    * Endpoint to get instance status and information.
    * @param instanceName The name of the WhatsApp instance.
    */
-  INSTANCE_STATUS: (instanceName: string) => `/instance/fetchInstances/${instanceName}`,
+  INSTANCE_STATUS: (instanceName: string) => `/instance/connectionState/${instanceName}`,
 
   /**
    * Endpoint to delete a specific instance.
@@ -42,16 +42,16 @@ export const API_ENDPOINTS = {
    * @param instanceName The name of the WhatsApp instance.
    */
   INSTANCE_PAUSE: (instanceName: string) => `/instance/pause/${instanceName}`,
-
-  /**
-   * Endpoint for sending a text message.
-   * @param instanceName The name of the WhatsApp instance.
-   */
-  SEND_TEXT: (instanceName: string) => `/message/sendText/${instanceName}`,
-  
-  /**
-   * Endpoint for sending a media file.
-   * @param instanceName The name of the WhatsApp instance.
-   */
-  SEND_MEDIA: (instanceName: string) => `/message/sendMedia/${instanceName}`,
 };
+
+/**
+ * Endpoint for sending a text message.
+ * @param instanceName The name of the WhatsApp instance.
+ */
+export const SEND_TEXT = (instanceName: string) => `/message/sendText/${instanceName}`;
+
+/**
+ * Endpoint for sending a media file.
+ * @param instanceName The name of the WhatsApp instance.
+ */
+export const SEND_MEDIA = (instanceName: string) => `/message/sendMedia/${instanceName}`;
