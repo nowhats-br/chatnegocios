@@ -82,10 +82,40 @@ export default function Connections() {
 
     const poll = async () => {
       try {
-        const statusRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(selectedConnection.instance_name), { method: 'GET', suppressToast: true });
-        const stateRaw = statusRes?.state || statusRes?.status || statusRes?.connectionState || statusRes?.instance?.state;
-        const stateUpper = String(stateRaw || '').toUpperCase();
-        const isConnected = ['CONNECTED', 'OPEN', 'ONLINE'].includes(stateUpper);
+        const statusRes = await evolutionApiRequest<any>(
+          API_ENDPOINTS.INSTANCE_STATUS(selectedConnection.instance_name),
+          { method: 'GET', suppressToast: true }
+        );
+
+        // Suporta múltiplas variantes de payload
+        const instanceFromArray = Array.isArray(statusRes?.instances)
+          ? (statusRes.instances.find((x: any) => x?.instance?.instanceName === selectedConnection.instance_name) || statusRes.instances[0])
+          : null;
+
+        const stateCandidates = [
+          statusRes?.state,
+          statusRes?.status,
+          statusRes?.connectionState,
+          statusRes?.instance?.state,
+          statusRes?.session?.state,
+          statusRes?.session?.status,
+          instanceFromArray?.state,
+          instanceFromArray?.status,
+          instanceFromArray?.connectionState,
+          instanceFromArray?.session?.state,
+          instanceFromArray?.session?.status,
+        ];
+        const stateUpper = String(stateCandidates.find(Boolean) || '').toUpperCase();
+
+        const isConnectedFlag = Boolean(
+          statusRes?.isConnected ||
+          statusRes?.connected ||
+          statusRes?.instance?.isConnected ||
+          statusRes?.session?.isConnected ||
+          instanceFromArray?.isConnected ||
+          instanceFromArray?.session?.isConnected
+        );
+        const isConnected = isConnectedFlag || ['CONNECTED', 'OPEN', 'ONLINE', 'AUTHENTICATED', 'READY'].includes(stateUpper);
 
         if (isConnected) {
           setIsQrModalOpen(false);
@@ -93,31 +123,86 @@ export default function Connections() {
           setQrValue('');
           setPairingCode('');
 
-          // Sincroniza perfil e persiste status
           try {
-            const owner: string | undefined = statusRes?.owner || statusRes?.instance?.owner || statusRes?.instances?.[0]?.owner || (selectedConnection.instance_data as any)?.owner;
-            const phoneNumber = owner ? owner.split('@')[0] : undefined;
-            let profilePictureUrl: string | undefined = (selectedConnection.instance_data as any)?.profilePictureUrl;
-            const profileName: string | undefined = statusRes?.name || statusRes?.pushName || statusRes?.instance?.pushName || statusRes?.instance?.name || (selectedConnection.instance_data as any)?.profileName;
-            if (phoneNumber && !profilePictureUrl) {
-              const picRes = await evolutionApiRequest<any>(API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name), {
-                method: 'POST',
-                body: JSON.stringify({ number: phoneNumber }),
-                suppressToast: true,
-              });
-              profilePictureUrl = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
+            // Extrair owner/numero/nome de várias fontes
+            const ownerCandidates = [
+              statusRes?.owner,
+              statusRes?.instance?.owner,
+              statusRes?.session?.wid,
+              statusRes?.session?.id,
+              instanceFromArray?.owner,
+              instanceFromArray?.session?.wid,
+              instanceFromArray?.session?.id,
+              (selectedConnection.instance_data as any)?.owner,
+            ];
+            let owner: any = ownerCandidates.find(Boolean);
+
+            let phoneNumber: string | undefined = undefined;
+            if (typeof owner === 'string') {
+              phoneNumber = owner.includes('@') ? owner.split('@')[0] : owner.replace(/\D/g, '');
+            } else if (owner && typeof owner === 'object' && owner.user) {
+              phoneNumber = String(owner.user);
+              // padroniza owner no formato chatId se possível
+              owner = `${owner.user}@${owner.server || 's.whatsapp.net'}`;
             }
-            const merged = { ...(selectedConnection.instance_data as any), owner, number: phoneNumber, profilePictureUrl, profileName };
+
+            const profileNameCandidates = [
+              statusRes?.name,
+              statusRes?.pushName,
+              statusRes?.instance?.pushName,
+              statusRes?.instance?.name,
+              statusRes?.session?.pushName,
+              instanceFromArray?.pushName,
+              instanceFromArray?.session?.pushName,
+              (selectedConnection.instance_data as any)?.profileName,
+            ];
+            const profileName: string | undefined = profileNameCandidates.find(Boolean);
+
+            let profilePictureUrl: string | undefined = (selectedConnection.instance_data as any)?.profilePictureUrl;
+
+            // Buscar foto do perfil com tentativas para number e chatId
+            const tryFetchProfilePic = async (): Promise<string | undefined> => {
+              let url: string | undefined;
+              if (phoneNumber) {
+                const picRes = await evolutionApiRequest<any>(
+                  API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name),
+                  { method: 'POST', body: JSON.stringify({ number: phoneNumber }), suppressToast: true }
+                ).catch(() => null);
+                url = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
+              }
+              if (!url && owner) {
+                const picRes2 = await evolutionApiRequest<any>(
+                  API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name),
+                  { method: 'POST', body: JSON.stringify({ chatId: owner }), suppressToast: true }
+                ).catch(() => null);
+                url = picRes2?.url || picRes2?.profilePicUrl || picRes2?.profilePictureUrl;
+              }
+              return url;
+            };
+
+            if (!profilePictureUrl) {
+              profilePictureUrl = await tryFetchProfilePic();
+            }
+
+            const merged = {
+              ...(selectedConnection.instance_data as any),
+              owner,
+              number: phoneNumber,
+              profilePictureUrl,
+              profileName,
+              connectedAt: new Date().toISOString(),
+            };
             const saved = await dbClient.connections.update(selectedConnection.id, { status: 'CONNECTED', instance_data: merged });
-            setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
+            setConnections(prev => prev.map(c => (c.id === saved.id ? saved : c)));
+            setSelectedConnection(prev => (prev && prev.id === saved.id ? saved : prev));
           } catch (e) {
             console.warn('Falha ao sincronizar perfil após conexão:', (e as any).message);
           }
 
           toast.success('Conectado com sucesso.');
-          return; // encerra polling
+          return;
         }
-      } catch (err) {
+      } catch {
         // Ignora erros intermitentes de polling
       }
 
@@ -125,8 +210,10 @@ export default function Connections() {
     };
 
     poll();
-    return () => { cancelled = true; };
-  }, [isQrModalOpen, selectedConnection]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isQrModalOpen, selectedConnection, evolutionApiRequest]);
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
