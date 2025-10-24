@@ -157,8 +157,8 @@ export default function Connections() {
         suppressToast: true,
       });
 
-      let qr = res?.base64 || res?.qrcode;
-      const pairing = res?.pairingCode;
+      let qr = res?.base64 || res?.qrcode || res?.qrCode;
+      const pairing = res?.pairingCode || res?.code;
 
       // Fallback: buscar QR no endpoint dedicado caso não venha na resposta do connect
       if (!qr) {
@@ -166,7 +166,7 @@ export default function Connections() {
           method: 'GET',
           suppressToast: true,
         });
-        qr = qrRes?.base64 || qrRes?.qrcode || qr;
+        qr = qrRes?.base64 || qrRes?.qrcode || qrRes?.qrCode || qr;
       }
 
       if (qr) setQrCodeData(qr);
@@ -186,7 +186,7 @@ export default function Connections() {
   const handleDisconnect = async (connection: Connection) => {
     try {
       await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
-        method: 'POST',
+        method: 'DELETE',
         suppressToast: true,
       });
       toast.success('Comando de desconexão enviado.');
@@ -197,11 +197,44 @@ export default function Connections() {
 
   const handlePause = async (connection: Connection) => {
     try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
+      // Ajusta configurações para reduzir atividade
+      await evolutionApiRequest<any>(API_ENDPOINTS.SETTINGS_SET(connection.instance_name), {
         method: 'POST',
+        body: JSON.stringify({
+          reject_call: false,
+          groups_ignore: true,
+          always_online: false,
+          read_messages: false,
+          read_status: false,
+          sync_full_history: false,
+        }),
         suppressToast: true,
       });
-      toast.success('Comando para pausar enviado.');
+
+      // Desabilita webhook para pausar entrega de eventos ao backend
+      let finalWebhookUrl = webhookUrlEnv;
+      if (!finalWebhookUrl) {
+        if (backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+          finalWebhookUrl = `${baseUrl}/api/whatsapp/webhook`;
+        } else {
+          finalWebhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
+        }
+      }
+      const webhookWithUid = `${finalWebhookUrl}?uid=${encodeURIComponent(user!.id)}`;
+      await evolutionApiRequest<any>(API_ENDPOINTS.WEBHOOK_SET(connection.instance_name), {
+        method: 'POST',
+        body: JSON.stringify({
+          url: webhookWithUid,
+          events: [],
+          webhook_by_events: false,
+          webhook_base64: false,
+          enabled: false,
+        }),
+        suppressToast: true,
+      }).catch(() => {});
+
+      toast.success('Conexão pausada. Webhook desativado.');
       await dbClient.connections.update(connection.id, { status: 'PAUSED' });
     } catch (error: any) {
       toast.error('Erro ao pausar conexão', { description: error.message });
@@ -209,9 +242,63 @@ export default function Connections() {
   };
 
   const handleResume = async (connection: Connection) => {
-    await handleConnect(connection);
-    toast.info('Tentando retomar a conexão...');
+    try {
+      // Reativa configurações
+      await evolutionApiRequest<any>(API_ENDPOINTS.SETTINGS_SET(connection.instance_name), {
+        method: 'POST',
+        body: JSON.stringify({
+          reject_call: false,
+          groups_ignore: true,
+          always_online: true,
+          read_messages: true,
+          read_status: true,
+          sync_full_history: false,
+        }),
+        suppressToast: true,
+      });
+
+      // Reabilita webhook
+      let finalWebhookUrl = webhookUrlEnv;
+      if (!finalWebhookUrl) {
+        if (backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+          finalWebhookUrl = `${baseUrl}/api/whatsapp/webhook`;
+        } else {
+          finalWebhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
+        }
+      }
+      const webhookWithUid = `${finalWebhookUrl}?uid=${encodeURIComponent(user!.id)}`;
+      await evolutionApiRequest<any>(API_ENDPOINTS.WEBHOOK_SET(connection.instance_name), {
+        method: 'POST',
+        body: JSON.stringify({
+          url: webhookWithUid,
+          webhook_by_events: true,
+          webhook_base64: false,
+          events: [
+            'APPLICATION_STARTUP',
+            'QRCODE_UPDATED',
+            'CONNECTION_UPDATE',
+            'MESSAGES_UPSERT'
+          ],
+        }),
+        suppressToast: true,
+      });
+
+      // Consulta estado atual e ajusta status local
+      const statusRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name), {
+        method: 'GET',
+        suppressToast: true,
+      });
+      const state = String(statusRes?.state || statusRes?.status || statusRes?.connectionState || '').toLowerCase();
+      const connected = state === 'open' || state === 'connected' || Boolean(statusRes?.connected || statusRes?.isConnected);
+      await dbClient.connections.update(connection.id, { status: connected ? 'CONNECTED' : 'DISCONNECTED' });
+
+      toast.success('Conexão retomada. Webhook reativado.');
+    } catch (error: any) {
+      toast.error('Erro ao retomar conexão', { description: error.message });
+    }
   };
+
 
   const confirmDelete = async () => {
     if (!selectedConnection) return;
@@ -262,31 +349,29 @@ export default function Connections() {
     }
     
     try {
+      // Anexa uid ao webhook para identificar o usuário no backend
+      const webhookWithUid = `${finalWebhookUrl}?uid=${encodeURIComponent(user.id)}`;
+
       const createPayload: any = {
         instanceName: newConnectionName,
         qrcode: true,
-        webhook: {
-          url: finalWebhookUrl,
-          webhookByEvents: true,
-          webhookBase64: false,
-          events: [
-            'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_UPSERT',
-            'MESSAGES_UPDATE', 'SEND_MESSAGE', 'CONTACTS_SET', 'CONTACTS_UPSERT',
-            'CONTACTS_UPDATE', 'PRESENCE_UPDATE', 'CHATS_SET', 'CHATS_UPSERT',
-            'CHATS_UPDATE', 'CHATS_DELETE', 'GROUPS_UPSERT', 'GROUPS_UPDATE',
-            'GROUP_PARTICIPANTS_UPDATE', 'CONNECTION_UPDATE',
-          ],
-          headers: { 'x-user-id': user.id },
-        },
-        // Compatibilidade com variantes v1 que usam webhookUrl no nível raiz
-        webhookUrl: finalWebhookUrl,
-        settings: {
-          reject_call: 'true',
-          messages_read: 'read',
-          webhook_by_events: true,
-          webhook_base64: false,
-        },
-        // Removido integration para máxima compatibilidade com v1
+        integration: 'WHATSAPP-BAILEYS',
+        webhook: webhookWithUid,
+        webhook_by_events: true,
+        events: [
+          'APPLICATION_STARTUP',
+          'QRCODE_UPDATED',
+          'CONNECTION_UPDATE',
+          'MESSAGES_UPSERT'
+        ],
+        // Configurações padrão recomendadas para v1
+        reject_call: false,
+        msg_call: '',
+        groups_ignore: true,
+        always_online: true,
+        read_messages: true,
+        read_status: true,
+        sync_full_history: false,
       };
 
       // Tenta múltiplos endpoints de criação para compatibilidade com diferentes versões da Evolution API

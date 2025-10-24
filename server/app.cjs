@@ -67,11 +67,15 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     const instanceName = payload.instance;
     const eventType = String(payload.event || '').toLowerCase();
-    const ownerUserId = req.headers['x-user-id'];
+    const ownerUserId = (
+      req.headers['x-user-id'] ||
+      (req.query && (req.query.uid || req.query.user_id || req.query.userId)) ||
+      payload?.uid || payload?.user_id || payload?.userId
+    );
 
     if (!ownerUserId) {
-      console.error(`[Webhook] Erro crítico: user_id não encontrado no header para o evento da instância '${instanceName}'.`);
-      return res.status(400).json({ error: 'x-user-id header é obrigatório' });
+      console.error(`[Webhook] Erro crítico: user_id não encontrado em header nem query para o evento da instância '${instanceName}'.`);
+      return res.status(400).json({ error: 'x-user-id header ou uid query é obrigatório' });
     }
 
     if (eventType === 'connection.update') {

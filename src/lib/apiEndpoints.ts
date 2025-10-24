@@ -42,6 +42,21 @@ export const API_ENDPOINTS = {
    * @param instanceName The name of the WhatsApp instance.
    */
   INSTANCE_PAUSE: (instanceName: string) => `/instance/pause/${instanceName}`,
+
+  /**
+   * Endpoint to set webhook configuration for an instance.
+   */
+  WEBHOOK_SET: (instanceName: string) => `/webhook/set/${instanceName}`,
+
+  /**
+   * Endpoint to get current webhook configuration.
+   */
+  WEBHOOK_FIND: (instanceName: string) => `/webhook/find/${instanceName}`,
+
+  /**
+   * Endpoint to set instance settings (v1 Settings Set).
+   */
+  SETTINGS_SET: (instanceName: string) => `/settings/set/${instanceName}`,
 };
 
 /**
