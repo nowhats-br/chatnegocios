@@ -53,7 +53,7 @@ const AtendimentoRealtime: React.FC = () => {
         }
       )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `user_id=eq.${user.id}` }, 
-        (payload) => {
+        (payload: any) => {
           const newMessage = payload.new as TMessage;
           setConversations(prev => {
             const convIndex = prev.findIndex(c => c.id === newMessage.conversation_id);
@@ -67,7 +67,7 @@ const AtendimentoRealtime: React.FC = () => {
           });
         }
       )
-      .subscribe((status, err) => {
+      .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
           console.log('Conectado ao canal de atendimento em tempo real!');
         }

@@ -86,7 +86,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
     const channel = supabase
       .channel(`public:messages:conversation_id=eq.${conversation.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversation.id}` },
-        (payload) => {
+        (payload: any) => {
           setMessages(prev => {
             const exists = prev.some(m => m.id === payload.new.id);
             return exists ? prev : [...prev, payload.new as Message];
