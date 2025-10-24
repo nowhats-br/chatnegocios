@@ -13,7 +13,8 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const PORT = process.env.PORT || 3001;
+// Corrige tipo da porta: garante um número
+const PORT = Number(process.env.PORT) || 3001;
 const app = express();
 
 // Configuração de CORS
