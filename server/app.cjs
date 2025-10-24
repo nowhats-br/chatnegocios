@@ -8,9 +8,9 @@ const path = require('path');
 dotenv.config();
 
 // Verificação Crítica de Variáveis de Ambiente
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('\x1b[31m[FATAL]\x1b[0m Variáveis de ambiente do Supabase (SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY) não estão definidas. O backend não pode iniciar.');
-  process.exit(1);
+const SUPABASE_AVAILABLE = /^https?:\/\//.test(process.env.SUPABASE_URL || '') && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_AVAILABLE) {
+  console.warn('\x1b[33m[WARN]\x1b[0m Variáveis do Supabase não definidas. Webhook de persistência desabilitado, servidor segue para proxy e frontend.');
 }
 
 // Corrige tipo da porta: garante um número
@@ -45,8 +45,8 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(bodyParser.json({ limit: '10mb' }));
 
-// Cliente Admin do Supabase
-const supabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Cliente Admin do Supabase (opcional)
+const supabaseAdmin = SUPABASE_AVAILABLE ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY) : null;
 
 // Servir o frontend buildado
 const distPath = path.join(__dirname, '..', 'dist');
@@ -60,6 +60,9 @@ app.get('/api/health', (_req, res) => {
 
 // Webhook para receber eventos da Evolution API
 app.post('/api/whatsapp/webhook', async (req, res) => {
+  if (!supabaseAdmin) {
+    return res.status(200).json({ ok: true, warning: 'Supabase desabilitado no backend.' });
+  }
   try {
     const payload = req.body || {};
     const instanceName = payload.instance;
@@ -160,4 +163,47 @@ app.get('*', (req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`\x1b[32m[OK]\x1b[0m Backend (webhook) server rodando em http://localhost:${PORT}`);
+});
+
+// Proxy para Evolution API para evitar CORS e centralizar credenciais
+const EVOLUTION_API_URL = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
+
+app.all('/api/evolution/*', async (req, res) => {
+  if (!EVOLUTION_API_URL) {
+    return res.status(500).json({ error: 'EVOLUTION_API_URL não configurado no backend.' });
+  }
+  const path = req.path.replace('/api/evolution', '');
+  const qsIndex = req.originalUrl.indexOf('?');
+  const query = qsIndex >= 0 ? req.originalUrl.slice(qsIndex) : '';
+  const targetUrl = `${EVOLUTION_API_URL}${path}${query}`;
+
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    apikey: EVOLUTION_API_KEY,
+    'X-API-Key': EVOLUTION_API_KEY,
+    ...(EVOLUTION_API_KEY ? { Authorization: `Bearer ${EVOLUTION_API_KEY}` } : {}),
+  };
+
+  try {
+    const resp = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : JSON.stringify(req.body || {}),
+    });
+    const contentType = resp.headers.get('content-type') || '';
+    const status = resp.status;
+    if (contentType.includes('application/json')) {
+      const json = await resp.json().catch(() => null);
+      res.status(status).json(json ?? {});
+    } else {
+      const text = await resp.text().catch(() => '');
+      res.status(status).send(text);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[Proxy Evolution] Erro ao encaminhar:', msg);
+    res.status(502).json({ error: msg });
+  }
 });

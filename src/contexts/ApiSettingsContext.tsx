@@ -27,6 +27,11 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const envApiUrl = (import.meta.env.VITE_EVOLUTION_API_URL as string) || null;
   const envApiKey = (import.meta.env.VITE_EVOLUTION_API_KEY as string) || null;
+  const envUseProxy = String(import.meta.env.VITE_EVOLUTION_USE_PROXY || 'true') === 'true';
+  const backendBase = (() => {
+    const url = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
+    return url.endsWith('/') ? url.slice(0, -1) : url;
+  })();
 
   const normalizeUrl = (url: string | null) => {
     if (!url) return null;
@@ -35,10 +40,11 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const fetchSettings = useCallback(async () => {
     if (!user) {
-      // Quando não logado, ainda aplicamos fallback de .env para permitir renderização/diagnóstico
       setLoading(false);
-      setApiUrl(normalizeUrl(envApiUrl) || null);
-      setApiKey(envApiKey || null);
+      const proxyBase = `${backendBase}/api/evolution`;
+      const directUrl = normalizeUrl(envApiUrl) || null;
+      setApiUrl(envUseProxy ? proxyBase : directUrl);
+      setApiKey(envUseProxy ? null : (envApiKey || null));
       return;
     }
     
@@ -47,22 +53,24 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.ensureExists();
       const data = await dbClient.profiles.get(user.id);
       
-      // Preferência: perfil no DB, e fallback para .env se não existir
-      const effectiveUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
-      const effectiveKey = data.evolution_api_key || envApiKey || null;
+      const directUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
+      const proxyBase = `${backendBase}/api/evolution`;
+      const effectiveUrl = envUseProxy ? proxyBase : directUrl;
+      const effectiveKey = envUseProxy ? null : (data.evolution_api_key || envApiKey || null);
 
       setApiUrl(effectiveUrl);
       setApiKey(effectiveKey);
 
     } catch (error: any) {
       toast.error("Erro ao carregar configurações da API", { description: error.message });
-      // Fallback para .env em caso de falha no DB
-      setApiUrl(normalizeUrl(envApiUrl) || null);
-      setApiKey(envApiKey || null);
+      const proxyBase = `${backendBase}/api/evolution`;
+      const directUrl = normalizeUrl(envApiUrl) || null;
+      setApiUrl(envUseProxy ? proxyBase : directUrl);
+      setApiKey(envUseProxy ? null : (envApiKey || null));
     } finally {
       setLoading(false);
     }
-  }, [user, envApiUrl, envApiKey]);
+  }, [user, envApiUrl, envApiKey, envUseProxy, backendBase]);
 
 
   useEffect(() => {
@@ -85,7 +93,7 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  const isConfigured = !!apiUrl && !!apiKey;
+  const isConfigured = !!apiUrl && (envUseProxy || !!apiKey);
 
   return (
     <ApiSettingsContext.Provider value={{ apiUrl, apiKey, isConfigured, loading, updateSettings }}>
