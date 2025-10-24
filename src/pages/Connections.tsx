@@ -74,6 +74,76 @@ export default function Connections() {
     };
   }, [user, fetchConnections]);
 
+  // Fecha automaticamente o modal de QR quando a instância conectar e atualiza status
+  useEffect(() => {
+    if (!isQrModalOpen || !selectedConnection) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const statusRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(selectedConnection.instance_name), {
+          method: 'GET',
+          suppressToast: true,
+        });
+
+        const instancesArr = Array.isArray(statusRes?.instances) ? statusRes.instances : null;
+        const inst = instancesArr
+          ? (instancesArr.find((x: any) => x?.instance?.instanceName === selectedConnection.instance_name) || instancesArr[0])
+          : (statusRes?.instance || statusRes);
+
+        const stateCandidates = [
+          inst?.state,
+          inst?.status,
+          inst?.connectionState,
+          inst?.session?.state,
+          inst?.session?.status,
+          statusRes?.state,
+          statusRes?.status,
+        ];
+        const stateLower = String(stateCandidates.find(Boolean) || '').toLowerCase();
+        const isConnectedFlag = Boolean(
+          inst?.isConnected || inst?.connected || inst?.session?.isConnected ||
+          statusRes?.isConnected || statusRes?.connected
+        );
+        const isConnected = isConnectedFlag || stateLower === 'open' || stateLower === 'connected';
+
+        if (isConnected && !cancelled) {
+          const ownerRaw = inst?.owner || inst?.session?.owner || inst?.instance?.owner || statusRes?.owner;
+          const chatId = typeof ownerRaw === 'string' ? ownerRaw : (ownerRaw?.wid?.id || ownerRaw?.id || '');
+          const number = chatId ? chatId.split('@')[0] : undefined;
+          const profileName = [
+            inst?.session?.pushName,
+            inst?.pushName,
+            inst?.name,
+            statusRes?.session?.pushName,
+            statusRes?.pushName,
+            (selectedConnection.instance_data as any)?.profileName,
+          ].find(Boolean);
+
+          const updatedData = {
+            ...(selectedConnection.instance_data as any),
+            owner: chatId || (selectedConnection.instance_data as any)?.owner,
+            number,
+            profileName,
+            connectedAt: new Date().toISOString(),
+          };
+
+          try {
+            const updated = await dbClient.connections.update(selectedConnection.id, { status: 'CONNECTED', instance_data: updatedData });
+            setConnections(prev => prev.map(c => c.id === updated.id ? updated : c));
+          } catch {}
+
+          setIsQrModalOpen(false);
+          toast.success('Instância conectada com sucesso.');
+        }
+      } catch {}
+    };
+
+    const timer = setInterval(poll, 2000);
+    poll();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [isQrModalOpen, selectedConnection, evolutionApiRequest]);
+
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
     setIsQrModalOpen(true);
@@ -87,14 +157,23 @@ export default function Connections() {
         suppressToast: true,
       });
 
-      const qr = res?.base64 || res?.qrcode;
+      let qr = res?.base64 || res?.qrcode;
       const pairing = res?.pairingCode;
+
+      // Fallback: buscar QR no endpoint dedicado caso não venha na resposta do connect
+      if (!qr) {
+        const qrRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_QR_CODE(connection.instance_name), {
+          method: 'GET',
+          suppressToast: true,
+        });
+        qr = qrRes?.base64 || qrRes?.qrcode || qr;
+      }
 
       if (qr) setQrCodeData(qr);
       if (pairing) setPairingCode(pairing);
 
       if (!qr && !pairing) {
-        toast.warning("QR Code não recebido. A instância pode já estar conectando.");
+        toast.warning('QR Code não recebido. A instância pode já estar conectando.');
       }
     } catch (error: any) {
       toast.error('Erro ao iniciar conexão', { description: error.message });
@@ -161,7 +240,7 @@ export default function Connections() {
       return;
     }
     if (!user) {
-      toast.error("Você precisa estar logado para criar uma instância.");
+      toast.error('Você precisa estar logado para criar uma instância.');
       return;
     }
     setIsCreating(true);
@@ -177,7 +256,7 @@ export default function Connections() {
     }
 
     if (!finalWebhookUrl) {
-      toast.error("Configuração Incompleta", { description: "A URL do webhook não pôde ser determinada. Verifique VITE_BACKEND_URL ou VITE_EVOLUTION_WEBHOOK_URL no seu arquivo .env." });
+      toast.error('Configuração Incompleta', { description: 'A URL do webhook não pôde ser determinada. Verifique VITE_BACKEND_URL ou VITE_EVOLUTION_WEBHOOK_URL no seu arquivo .env.' });
       setIsCreating(false);
       return;
     }
@@ -190,21 +269,21 @@ export default function Connections() {
           url: finalWebhookUrl,
           webhookByEvents: true,
           events: [
-            "APPLICATION_STARTUP", "QRCODE_UPDATED", "MESSAGES_SET", "MESSAGES_UPSERT",
-            "MESSAGES_UPDATE", "SEND_MESSAGE", "CONTACTS_SET", "CONTACTS_UPSERT",
-            "CONTACTS_UPDATE", "PRESENCE_UPDATE", "CHATS_SET", "CHATS_UPSERT",
-            "CHATS_UPDATE", "CHATS_DELETE", "GROUPS_UPSERT", "GROUPS_UPDATE",
-            "GROUP_PARTICIPANTS_UPDATE", "CONNECTION_UPDATE",
+            'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_UPSERT',
+            'MESSAGES_UPDATE', 'SEND_MESSAGE', 'CONTACTS_SET', 'CONTACTS_UPSERT',
+            'CONTACTS_UPDATE', 'PRESENCE_UPDATE', 'CHATS_SET', 'CHATS_UPSERT',
+            'CHATS_UPDATE', 'CHATS_DELETE', 'GROUPS_UPSERT', 'GROUPS_UPDATE',
+            'GROUP_PARTICIPANTS_UPDATE', 'CONNECTION_UPDATE',
           ],
           headers: { 'x-user-id': user.id },
         },
         settings: {
-          "reject_call": "true",
-          "messages_read": "read",
-          "webhook_by_events": true,
-          "webhook_base64": false
+          reject_call: 'true',
+          messages_read: 'read',
+          webhook_by_events: true,
+          webhook_base64: false,
         },
-        integration: 'whatsapp-web.js'
+        integration: 'whatsapp-web.js',
       };
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
@@ -214,14 +293,17 @@ export default function Connections() {
       });
 
       if (!creationResponse || (creationResponse.status === 'error' && creationResponse.message)) {
-        throw new Error(creationResponse?.message || "A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.");
+        throw new Error(creationResponse?.message || 'A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.');
       }
 
-      await dbClient.connections.create({
+      const created = await dbClient.connections.create({
         instance_name: newConnectionName,
         status: 'DISCONNECTED',
         instance_data: creationResponse,
       });
+
+      // Atualiza lista local imediatamente para refletir o botão "Conectar"
+      setConnections(prev => [created, ...prev]);
 
       toast.success(`Instância "${newConnectionName}" criada com sucesso.`);
       setIsCreateModalOpen(false);
