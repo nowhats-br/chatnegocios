@@ -3,7 +3,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Trash2, MoreVertical, PowerOff, Power, Pause, CheckCircle, PauseCircle } from 'lucide-react';
+import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Trash2, MoreVertical, PowerOff, Power, Pause } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
