@@ -286,11 +286,27 @@ export default function Connections() {
         integration: 'whatsapp-web.js',
       };
 
-      const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
-        method: 'POST',
-        body: JSON.stringify(createPayload),
-        suppressToast: true,
-      });
+      // Tenta múltiplos endpoints de criação para compatibilidade com diferentes versões da Evolution API
+      const createEndpoints = [
+        API_ENDPOINTS.INSTANCE_CREATE,
+        '/instances/create',
+        '/v1/instance/create',
+        '/v1/instances/create',
+      ];
+
+      let creationResponse: EvolutionInstanceCreateResponse | null = null;
+      for (const ep of createEndpoints) {
+        try {
+          const res = await evolutionApiRequest<EvolutionInstanceCreateResponse>(ep, {
+            method: 'POST',
+            body: JSON.stringify(createPayload),
+            suppressToast: true,
+          });
+          if (res) { creationResponse = res; break; }
+        } catch (e) {
+          // segue para o próximo endpoint
+        }
+      }
 
       if (!creationResponse || (creationResponse.status === 'error' && creationResponse.message)) {
         throw new Error(creationResponse?.message || 'A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.');
