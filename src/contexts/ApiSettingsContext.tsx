@@ -25,11 +25,20 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const envApiUrl = (import.meta.env.VITE_EVOLUTION_API_URL as string) || null;
+  const envApiKey = (import.meta.env.VITE_EVOLUTION_API_KEY as string) || null;
+
+  const normalizeUrl = (url: string | null) => {
+    if (!url) return null;
+    return url.endsWith('/') ? url.slice(0, -1) : url;
+  };
+
   const fetchSettings = useCallback(async () => {
     if (!user) {
+      // Quando não logado, ainda aplicamos fallback de .env para permitir renderização/diagnóstico
       setLoading(false);
-      setApiUrl(null);
-      setApiKey(null);
+      setApiUrl(normalizeUrl(envApiUrl) || null);
+      setApiKey(envApiKey || null);
       return;
     }
     
@@ -38,17 +47,22 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.ensureExists();
       const data = await dbClient.profiles.get(user.id);
       
-      setApiUrl(data.evolution_api_url || null);
-      setApiKey(data.evolution_api_key || null);
+      // Preferência: perfil no DB, e fallback para .env se não existir
+      const effectiveUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
+      const effectiveKey = data.evolution_api_key || envApiKey || null;
+
+      setApiUrl(effectiveUrl);
+      setApiKey(effectiveKey);
 
     } catch (error: any) {
       toast.error("Erro ao carregar configurações da API", { description: error.message });
-      setApiUrl(null);
-      setApiKey(null);
+      // Fallback para .env em caso de falha no DB
+      setApiUrl(normalizeUrl(envApiUrl) || null);
+      setApiKey(envApiKey || null);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, envApiUrl, envApiKey]);
 
 
   useEffect(() => {
@@ -62,7 +76,7 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
     try {
       await dbClient.profiles.update(user.id, newApiUrl, newApiKey);
-      setApiUrl(newApiUrl);
+      setApiUrl(normalizeUrl(newApiUrl));
       setApiKey(newApiKey);
       toast.success("Configurações da API salvas com sucesso!");
     } catch (error: any) {
