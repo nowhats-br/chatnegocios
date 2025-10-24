@@ -98,6 +98,7 @@ export default function Connections() {
             const owner: string | undefined = statusRes?.owner || statusRes?.instance?.owner || statusRes?.instances?.[0]?.owner || (selectedConnection.instance_data as any)?.owner;
             const phoneNumber = owner ? owner.split('@')[0] : undefined;
             let profilePictureUrl: string | undefined = (selectedConnection.instance_data as any)?.profilePictureUrl;
+            const profileName: string | undefined = statusRes?.name || statusRes?.pushName || statusRes?.instance?.pushName || statusRes?.instance?.name || (selectedConnection.instance_data as any)?.profileName;
             if (phoneNumber && !profilePictureUrl) {
               const picRes = await evolutionApiRequest<any>(API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name), {
                 method: 'POST',
@@ -106,7 +107,7 @@ export default function Connections() {
               });
               profilePictureUrl = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
             }
-            const merged = { ...(selectedConnection.instance_data as any), owner, number: phoneNumber, profilePictureUrl };
+            const merged = { ...(selectedConnection.instance_data as any), owner, number: phoneNumber, profilePictureUrl, profileName };
             const saved = await dbClient.connections.update(selectedConnection.id, { status: 'CONNECTED', instance_data: merged });
             setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
           } catch (e) {
@@ -307,6 +308,25 @@ export default function Connections() {
     return instanceData?.profilePictureUrl || '';
   };
 
+  const handleDisconnect = async (connection: Connection) => {
+    try {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
+        method: 'POST',
+        suppressToast: true,
+      });
+      toast.success('Conexão desconectada.');
+      const saved = await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+      setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
+    } catch (error: any) {
+      toast.error('Erro ao desconectar', { description: error.message });
+    }
+  };
+
+  const getProfileName = (connection: Connection) => {
+    const instanceData = connection.instance_data as any;
+    return instanceData?.profileName || instanceData?.name || '';
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -349,7 +369,7 @@ export default function Connections() {
                       </div>
                     )}
                     <div className="space-y-1">
-                      <CardTitle className="flex items-center gap-2">{connection.instance_name}</CardTitle>
+                      <CardTitle className="flex items-center gap-2">{getProfileName(connection) || connection.instance_name}</CardTitle>
                       <p className="text-sm text-muted-foreground">{getPhoneNumber(connection)}</p>
                     </div>
                   </div>
@@ -362,9 +382,9 @@ export default function Connections() {
                 <div className="flex items-center gap-2">
                   {uiStatus === 'connected' ? (
                     <>
-                      <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white" disabled>
+                      <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
                         <Power className="mr-2 h-4 w-4" />
-                        Conectado
+                        Desconectar
                       </Button>
                       <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handlePause(connection)} disabled={apiLoading}>
                         <Pause className="mr-2 h-4 w-4" />

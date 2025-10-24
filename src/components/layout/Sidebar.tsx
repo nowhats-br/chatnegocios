@@ -23,12 +23,12 @@ const navItems = [
 ];
 
 const Sidebar: React.FC = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
+  const [isCollapsed, setIsCollapsed] = useState(location.pathname !== '/');
 
   useEffect(() => {
-    // Collapse sidebar automatically on route change
-    setIsCollapsed(true);
+    // Collapse automatically only on non-dashboard pages; open on dashboard
+    setIsCollapsed(location.pathname !== '/');
   }, [location.pathname]);
 
   return (
