@@ -10,11 +10,12 @@ interface StatCardProps {
   change: string;
   changeType: 'increase' | 'decrease';
   color: string;
+  borderColor: string;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, change, changeType, color }) => {
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, change, changeType, color, borderColor }) => {
   return (
-    <Card className="glassmorphism">
+    <Card className={cn("glassmorphism border-l-4", borderColor)}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
         <Icon className={cn("h-5 w-5", color)} />

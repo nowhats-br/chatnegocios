@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+import defaultTheme from 'tailwindcss/defaultTheme';
+
 export default {
   darkMode: 'class',
   content: [
@@ -7,6 +9,9 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -50,12 +55,15 @@ export default {
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
       },
-      fontFamily: {
-        ui: ['Inter', 'ui-sans-serif', 'system-ui'],
-        menu: ['Poppins', 'ui-sans-serif', 'system-ui'],
-        buttons: ['Montserrat', 'ui-sans-serif', 'system-ui'],
-        heading: ['Oswald', 'ui-sans-serif', 'system-ui'],
-      }
+      keyframes: {
+        'grid': {
+          '0%': { transform: 'translateY(-50%)' },
+          '100%': { transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'grid': 'grid 15s linear infinite',
+      },
     },
   },
   plugins: [],

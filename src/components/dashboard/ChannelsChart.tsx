@@ -1,9 +1,27 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { useTheme } from '../providers/theme-provider';
+import { Loader2 } from 'lucide-react';
 
 const ChannelsChart: React.FC = () => {
   const { theme } = useTheme();
+  const [primaryColorValue, setPrimaryColorValue] = useState('');
+
+  useEffect(() => {
+    // A small delay to ensure CSS variables are applied after theme switch
+    const timer = setTimeout(() => {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const primaryColor = rootStyle.getPropertyValue('--primary').trim();
+      // ECharts expects comma-separated HSL values, not space-separated
+      const formattedColor = primaryColor.replace(/ /g, ', ');
+      setPrimaryColorValue(formattedColor);
+    }, 100); // Increased delay slightly for safety
+    return () => clearTimeout(timer);
+  }, [theme]);
+
+  if (!primaryColorValue) {
+    return <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  }
 
   const option = {
     tooltip: {
@@ -55,7 +73,7 @@ const ChannelsChart: React.FC = () => {
           borderWidth: 4
         },
         color: [
-            'hsl(var(--primary))',
+            `hsl(${primaryColorValue})`,
             '#3b82f6', // blue-500
             '#14b8a6', // teal-500
             '#f97316', // orange-500
@@ -64,7 +82,7 @@ const ChannelsChart: React.FC = () => {
     ]
   };
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} theme={theme === 'dark' ? 'dark' : 'light'} />;
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} theme={theme === 'dark' ? 'dark' : 'light'} notMerge={true} />;
 };
 
 export default ChannelsChart;
