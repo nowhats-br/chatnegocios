@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -23,22 +23,16 @@ const navItems = [
 ];
 
 const Sidebar: React.FC = () => {
-  const location = useLocation();
-  const [isCollapsed, setIsCollapsed] = useState(location.pathname !== '/');
-
-  useEffect(() => {
-    // Collapse automatically only on non-dashboard pages; open on dashboard
-    setIsCollapsed(location.pathname !== '/');
-  }, [location.pathname]);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
     <motion.div
-      animate={{ width: isCollapsed ? 80 : 280 }}
+      animate={{ width: isCollapsed ? 72 : 240 }}
       transition={{ duration: 0.3, ease: 'easeInOut' }}
-      className="relative flex flex-col h-full bg-card border-r text-foreground font-menu"
+      className="relative flex flex-col h-full bg-card border-r text-foreground"
     >
       <div className="flex items-center justify-center p-4 h-[65px] border-b">
-        <Command className="text-primary h-8 w-8" />
+        <Command className="text-primary h-7 w-7" />
         <AnimatePresence>
           {!isCollapsed && (
             <motion.span
@@ -46,7 +40,7 @@ const Sidebar: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, delay: 0.1 }}
-              className="font-bold text-xl ml-3 font-menu"
+              className="font-bold text-lg ml-3"
             >
               Chatvendas
             </motion.span>
@@ -54,15 +48,16 @@ const Sidebar: React.FC = () => {
         </AnimatePresence>
       </div>
 
-      <nav className="flex-1 px-4 py-4 space-y-2">
+      <nav className="flex-1 px-3 py-4 space-y-1.5">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end
+            title={item.label}
             className={({ isActive }) =>
               cn(
-                "flex items-center p-3 rounded-lg transition-colors hover:bg-accent hover:text-accent-foreground",
+                "flex items-center px-3 h-10 rounded-lg transition-colors hover:bg-accent hover:text-accent-foreground",
                 isActive && "bg-primary text-primary-foreground",
                 isCollapsed && "justify-center"
               )
@@ -76,7 +71,7 @@ const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-4 font-medium font-menu"
+                  className="ml-4 font-medium text-sm"
                 >
                   {item.label}
                 </motion.span>
@@ -86,12 +81,13 @@ const Sidebar: React.FC = () => {
         ))}
       </nav>
 
-      <div className="px-4 py-4 border-t space-y-2">
+      <div className="px-3 py-4 border-t space-y-1.5">
          <NavLink
             to="/configuracoes"
+            title="Configurações"
             className={({ isActive }) =>
               cn(
-                "flex items-center p-3 rounded-lg transition-colors hover:bg-accent hover:text-accent-foreground",
+                "flex items-center px-3 h-10 rounded-lg transition-colors hover:bg-accent hover:text-accent-foreground",
                 isActive && "bg-primary text-primary-foreground",
                 isCollapsed && "justify-center"
               )
@@ -105,7 +101,7 @@ const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-4 font-medium"
+                  className="ml-4 font-medium text-sm"
                 >
                   Configurações
                 </motion.span>
@@ -114,10 +110,10 @@ const Sidebar: React.FC = () => {
           </NavLink>
       </div>
 
-      <div className="p-4 border-t">
+      <div className="p-2 border-t">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-full flex items-center justify-center p-3 rounded-lg hover:bg-accent"
+          className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-accent"
         >
           {isCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
         </button>

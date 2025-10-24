@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Modal from '@/components/ui/Modal';
-import { Plus, Loader2, RefreshCw, AlertTriangle, Smartphone, Trash2, Power, Pause } from 'lucide-react';
+import { Plus, QrCode, Loader2, RefreshCw, AlertTriangle, Trash2, MoreVertical, PowerOff, Power, Pause, CheckCircle, PauseCircle } from 'lucide-react';
 import { dbClient } from '@/lib/dbClient';
 import { Connection, ConnectionStatus } from '@/types/database';
 import { toast } from 'sonner';
@@ -14,8 +13,8 @@ import { API_ENDPOINTS } from '@/lib/apiEndpoints';
 import AlertDialog from '@/components/ui/AlertDialog';
 import { EvolutionInstanceCreateResponse, STATUS_CONFIG } from '@/types/evolution-api';
 import { supabase } from '@/lib/supabase';
-import QRCode from 'react-qr-code';
-
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { cn } from '@/lib/utils';
 
 type UiStatus = keyof typeof STATUS_CONFIG;
 
@@ -35,7 +34,6 @@ export default function Connections() {
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
   const [newConnectionName, setNewConnectionName] = useState('');
   const [qrCodeData, setQrCodeData] = useState<string>('');
-  const [qrValue, setQrValue] = useState<string>('');
   const [pairingCode, setPairingCode] = useState<string>('');
   const [isCreating, setIsCreating] = useState(false);
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
@@ -76,144 +74,86 @@ export default function Connections() {
     };
   }, [user, fetchConnections]);
 
-  useEffect(() => {
-    if (!isQrModalOpen || !selectedConnection) return;
-    let cancelled = false;
+  const handleConnect = async (connection: Connection) => {
+    setSelectedConnection(connection);
+    setIsQrModalOpen(true);
+    setIsConnecting(connection.id);
+    setQrCodeData('');
+    setPairingCode('');
 
-    const poll = async () => {
-      try {
-        const statusRes = await evolutionApiRequest<any>(
-          API_ENDPOINTS.INSTANCE_STATUS(selectedConnection.instance_name),
-          { method: 'GET', suppressToast: true }
-        );
+    try {
+      const res = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), {
+        method: 'GET',
+        suppressToast: true,
+      });
 
-        // Suporta múltiplas variantes de payload
-        const instanceFromArray = Array.isArray(statusRes?.instances)
-          ? (statusRes.instances.find((x: any) => x?.instance?.instanceName === selectedConnection.instance_name) || statusRes.instances[0])
-          : null;
+      const qr = res?.base64 || res?.qrcode;
+      const pairing = res?.pairingCode;
 
-        const stateCandidates = [
-          statusRes?.state,
-          statusRes?.status,
-          statusRes?.connectionState,
-          statusRes?.instance?.state,
-          statusRes?.session?.state,
-          statusRes?.session?.status,
-          instanceFromArray?.state,
-          instanceFromArray?.status,
-          instanceFromArray?.connectionState,
-          instanceFromArray?.session?.state,
-          instanceFromArray?.session?.status,
-        ];
-        const stateUpper = String(stateCandidates.find(Boolean) || '').toUpperCase();
+      if (qr) setQrCodeData(qr);
+      if (pairing) setPairingCode(pairing);
 
-        const isConnectedFlag = Boolean(
-          statusRes?.isConnected ||
-          statusRes?.connected ||
-          statusRes?.instance?.isConnected ||
-          statusRes?.session?.isConnected ||
-          instanceFromArray?.isConnected ||
-          instanceFromArray?.session?.isConnected
-        );
-        const isConnected = isConnectedFlag || ['CONNECTED', 'OPEN', 'ONLINE', 'AUTHENTICATED', 'READY'].includes(stateUpper);
-
-        if (isConnected) {
-          setIsQrModalOpen(false);
-          setQrCodeData('');
-          setQrValue('');
-          setPairingCode('');
-
-          try {
-            // Extrair owner/numero/nome de várias fontes
-            const ownerCandidates = [
-              statusRes?.owner,
-              statusRes?.instance?.owner,
-              statusRes?.session?.wid,
-              statusRes?.session?.id,
-              instanceFromArray?.owner,
-              instanceFromArray?.session?.wid,
-              instanceFromArray?.session?.id,
-              (selectedConnection.instance_data as any)?.owner,
-            ];
-            let owner: any = ownerCandidates.find(Boolean);
-
-            let phoneNumber: string | undefined = undefined;
-            if (typeof owner === 'string') {
-              phoneNumber = owner.includes('@') ? owner.split('@')[0] : owner.replace(/\D/g, '');
-            } else if (owner && typeof owner === 'object' && owner.user) {
-              phoneNumber = String(owner.user);
-              // padroniza owner no formato chatId se possível
-              owner = `${owner.user}@${owner.server || 's.whatsapp.net'}`;
-            }
-
-            const profileNameCandidates = [
-              statusRes?.name,
-              statusRes?.pushName,
-              statusRes?.instance?.pushName,
-              statusRes?.instance?.name,
-              statusRes?.session?.pushName,
-              instanceFromArray?.pushName,
-              instanceFromArray?.session?.pushName,
-              (selectedConnection.instance_data as any)?.profileName,
-            ];
-            const profileName: string | undefined = profileNameCandidates.find(Boolean);
-
-            let profilePictureUrl: string | undefined = (selectedConnection.instance_data as any)?.profilePictureUrl;
-
-            // Buscar foto do perfil com tentativas para number e chatId
-            const tryFetchProfilePic = async (): Promise<string | undefined> => {
-              let url: string | undefined;
-              if (phoneNumber) {
-                const picRes = await evolutionApiRequest<any>(
-                  API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name),
-                  { method: 'POST', body: JSON.stringify({ number: phoneNumber }), suppressToast: true }
-                ).catch(() => null);
-                url = picRes?.url || picRes?.profilePicUrl || picRes?.profilePictureUrl;
-              }
-              if (!url && owner) {
-                const picRes2 = await evolutionApiRequest<any>(
-                  API_ENDPOINTS.CHAT_FETCH_PROFILE_PICTURE_URL(selectedConnection.instance_name),
-                  { method: 'POST', body: JSON.stringify({ chatId: owner }), suppressToast: true }
-                ).catch(() => null);
-                url = picRes2?.url || picRes2?.profilePicUrl || picRes2?.profilePictureUrl;
-              }
-              return url;
-            };
-
-            if (!profilePictureUrl) {
-              profilePictureUrl = await tryFetchProfilePic();
-            }
-
-            const merged = {
-              ...(selectedConnection.instance_data as any),
-              owner,
-              number: phoneNumber,
-              profilePictureUrl,
-              profileName,
-              connectedAt: new Date().toISOString(),
-            };
-            const saved = await dbClient.connections.update(selectedConnection.id, { status: 'CONNECTED', instance_data: merged });
-            setConnections(prev => prev.map(c => (c.id === saved.id ? saved : c)));
-            setSelectedConnection(prev => (prev && prev.id === saved.id ? saved : prev));
-          } catch (e) {
-            console.warn('Falha ao sincronizar perfil após conexão:', (e as any).message);
-          }
-
-          toast.success('Conectado com sucesso.');
-          return;
-        }
-      } catch {
-        // Ignora erros intermitentes de polling
+      if (!qr && !pairing) {
+        toast.warning("QR Code não recebido. A instância pode já estar conectando.");
       }
+    } catch (error: any) {
+      toast.error('Erro ao iniciar conexão', { description: error.message });
+      setIsQrModalOpen(false);
+    } finally {
+      setIsConnecting(null);
+    }
+  };
 
-      if (!cancelled) setTimeout(poll, 2000);
-    };
+  const handleDisconnect = async (connection: Connection) => {
+    try {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
+        method: 'POST',
+        suppressToast: true,
+      });
+      toast.success('Comando de desconexão enviado.');
+    } catch (error: any) {
+      toast.error('Erro ao desconectar', { description: error.message });
+    }
+  };
 
-    poll();
-    return () => {
-      cancelled = true;
-    };
-  }, [isQrModalOpen, selectedConnection, evolutionApiRequest]);
+  const handlePause = async (connection: Connection) => {
+    try {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
+        method: 'POST',
+        suppressToast: true,
+      });
+      toast.success('Comando para pausar enviado.');
+      await dbClient.connections.update(connection.id, { status: 'PAUSED' });
+    } catch (error: any) {
+      toast.error('Erro ao pausar conexão', { description: error.message });
+    }
+  };
+
+  const handleResume = async (connection: Connection) => {
+    await handleConnect(connection);
+    toast.info('Tentando retomar a conexão...');
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedConnection) return;
+    setIsDeleting(true);
+    try {
+      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_DELETE(selectedConnection.instance_name), {
+        method: 'DELETE',
+        suppressToast: true,
+      }).catch(e => console.warn("Falha ao deletar na API Evolution, prosseguindo com a exclusão local:", e.message));
+
+      await dbClient.connections.delete(selectedConnection.id);
+      
+      toast.success('Instância excluída com sucesso.');
+      setIsDeleteDialogOpen(false);
+      setSelectedConnection(null);
+    } catch (error: any) {
+      toast.error('Erro ao excluir instância', { description: error.message });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateInstance = async () => {
     if (!newConnectionName.trim()) {
@@ -246,15 +186,9 @@ export default function Connections() {
       const createPayload: any = {
         instanceName: newConnectionName,
         qrcode: false,
-        integration: 'WHATSAPP-BAILEYS',
-        rejectCall: true,
-        readMessages: true,
-        readStatus: true,
         webhook: {
           url: finalWebhookUrl,
-          byEvents: true,
-          base64: false,
-          headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+          webhookByEvents: true,
           events: [
             "APPLICATION_STARTUP", "QRCODE_UPDATED", "MESSAGES_SET", "MESSAGES_UPSERT",
             "MESSAGES_UPDATE", "SEND_MESSAGE", "CONTACTS_SET", "CONTACTS_UPSERT",
@@ -262,7 +196,15 @@ export default function Connections() {
             "CHATS_UPDATE", "CHATS_DELETE", "GROUPS_UPSERT", "GROUPS_UPDATE",
             "GROUP_PARTICIPANTS_UPDATE", "CONNECTION_UPDATE",
           ],
+          headers: { 'x-user-id': user.id },
         },
+        settings: {
+          "reject_call": "true",
+          "messages_read": "read",
+          "webhook_by_events": true,
+          "webhook_base64": false
+        },
+        integration: 'whatsapp-web.js'
       };
 
       const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
@@ -275,14 +217,11 @@ export default function Connections() {
         throw new Error(creationResponse?.message || "A API Evolution não respondeu à criação da instância. Verifique se a URL da API está correta e acessível.");
       }
 
-      const created = await dbClient.connections.create({
+      await dbClient.connections.create({
         instance_name: newConnectionName,
         status: 'DISCONNECTED',
         instance_data: creationResponse,
       });
-
-      // Atualiza lista local imediatamente para evitar necessidade de F5
-      setConnections((prev) => [created, ...prev]);
 
       toast.success(`Instância "${newConnectionName}" criada com sucesso.`);
       setIsCreateModalOpen(false);
@@ -295,123 +234,9 @@ export default function Connections() {
     }
   };
 
-  const handleConnect = async (connection: Connection) => {
-    setSelectedConnection(connection);
-    setIsQrModalOpen(true);
-    setIsConnecting(connection.id);
-    setQrCodeData('');
-    setQrValue('');
-    setPairingCode('');
-
-    try {
-      const res = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), {
-        method: 'GET',
-        suppressToast: true,
-      });
-
-      let qr = res?.base64 || res?.qrcode;
-      let pairing = res?.pairingCode;
-      let codeValue = res?.code || res?.qrCode?.code;
-
-      if (!qr && !pairing && !codeValue) {
-        const qrRes = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_QR_CODE(connection.instance_name), {
-          method: 'GET',
-          suppressToast: true,
-        });
-        qr = qrRes?.base64 || qrRes?.qrcode;
-        pairing = pairing || qrRes?.pairingCode;
-        codeValue = codeValue || qrRes?.code;
-      }
-
-      if (codeValue) setQrValue(codeValue);
-      if (qr) setQrCodeData(qr);
-      if (pairing) setPairingCode(pairing);
-
-      // Persistir status imediatamente no banco para refletir no UI
-      if (qr || pairing || codeValue) {
-        await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
-      } else {
-        await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
-      }
-
-      if (!qr && !pairing) {
-        toast.warning("QR Code não recebido. A instância pode já estar conectando.");
-      }
-    } catch (error: any) {
-      toast.error('Erro ao iniciar conexão', { description: error.message });
-      setIsQrModalOpen(false);
-    } finally {
-      setIsConnecting(null);
-    }
-  };
-
-
-
-  const handlePause = async (connection: Connection) => {
-    try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
-        method: 'POST',
-        suppressToast: true,
-      });
-      toast.success('Comando para pausar enviado.');
-      await dbClient.connections.update(connection.id, { status: 'PAUSED' });
-    } catch (error: any) {
-      toast.error('Erro ao pausar conexão', { description: error.message });
-    }
-  };
-
-
-
-  const confirmDelete = async () => {
-    if (!selectedConnection) return;
-    setIsDeleting(true);
-    try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_DELETE(selectedConnection.instance_name), {
-        method: 'DELETE',
-        suppressToast: true,
-      }).catch(e => console.warn("Falha ao deletar na API Evolution, prosseguindo com a exclusão local:", e.message));
-
-      await dbClient.connections.delete(selectedConnection.id);
-      // Atualiza a UI imediatamente, sem depender do canal em tempo real
-      setConnections(prev => prev.filter(c => c.id !== selectedConnection.id));
-      
-      toast.success('Instância excluída com sucesso.');
-      setIsDeleteDialogOpen(false);
-      setSelectedConnection(null);
-    } catch (error: any) {
-      toast.error('Erro ao excluir instância', { description: error.message });
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
   const getPhoneNumber = (connection: Connection) => {
     const instanceData = connection.instance_data as any;
-    return instanceData?.number || instanceData?.owner?.split('@')[0] || 'Não disponível';
-  };
-
-  const getProfilePicUrl = (connection: Connection) => {
-    const instanceData = connection.instance_data as any;
-    return instanceData?.profilePictureUrl || '';
-  };
-
-  const handleDisconnect = async (connection: Connection) => {
-    try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_LOGOUT(connection.instance_name), {
-        method: 'POST',
-        suppressToast: true,
-      });
-      toast.success('Conexão desconectada.');
-      const saved = await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
-      setConnections(prev => prev.map(c => c.id === saved.id ? saved : c));
-    } catch (error: any) {
-      toast.error('Erro ao desconectar', { description: error.message });
-    }
-  };
-
-  const getProfileName = (connection: Connection) => {
-    const instanceData = connection.instance_data as any;
-    return instanceData?.profileName || instanceData?.name || '';
+    return instanceData?.owner?.split('@')[0] || 'Não disponível';
   };
 
   return (
@@ -442,69 +267,80 @@ export default function Connections() {
           const uiStatus: UiStatus = normalizeStatus(connection.status);
           const statusInfo = STATUS_CONFIG[uiStatus];
           const isSelectedAndConnecting = isConnecting === connection.id;
+          const Icon = statusInfo.icon;
 
           return (
-            <Card key={connection.id} className="flex flex-col justify-between glassmorphism hover:shadow-xl transition-shadow">
-              <div>
-                <CardHeader className="flex-row items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    {getProfilePicUrl(connection) ? (
-                      <img src={getProfilePicUrl(connection)} alt="Perfil" className="w-10 h-10 rounded-full object-cover border" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Smartphone className="h-5 w-5 text-primary" />
-                      </div>
-                    )}
-                    <div className="space-y-1">
-                      <CardTitle className="flex items-center gap-2">{getProfileName(connection) || connection.instance_name}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{getPhoneNumber(connection)}</p>
-                    </div>
+            <div key={connection.id} className="bg-card border rounded-lg p-4 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+              <div className={cn("absolute left-0 top-0 h-full w-1.5", statusInfo.bgColor.replace('bg-','bg-').replace('/10',''))} />
+              
+              <div className="flex items-start justify-between pl-4">
+                <div className="flex items-center gap-4">
+                  <div className={cn("w-11 h-11 rounded-lg flex items-center justify-center", statusInfo.bgColor)}>
+                    <Icon className={cn("h-6 w-6", statusInfo.color, (uiStatus === 'connecting' || uiStatus === 'initializing') && 'animate-spin')} />
                   </div>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.bgColor} ${statusInfo.color}`}>
-                    {statusInfo.text}
-                  </span>
-                </CardHeader>
+                  <div>
+                    <p className="font-bold text-foreground">{connection.instance_name}</p>
+                    <p className="text-sm text-muted-foreground">{getPhoneNumber(connection)}</p>
+                  </div>
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 -mt-1 -mr-1">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => handleConnect(connection)}>
+                      <QrCode className="mr-2 h-4 w-4" />
+                      Ver QR Code
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-500 focus:text-red-500 focus:bg-red-500/10" onSelect={() => { setSelectedConnection(connection); setIsDeleteDialogOpen(true); }}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Excluir
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <CardContent>
+
+              <div className="flex items-end justify-between mt-4 pl-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className={cn("font-semibold text-sm", statusInfo.color)}>{statusInfo.text}</p>
+                </div>
                 <div className="flex items-center gap-2">
-                  {uiStatus === 'connected' ? (
+                  {uiStatus === 'disconnected' && (
+                    <Button size="sm" onClick={() => handleConnect(connection)} disabled={isSelectedAndConnecting || apiLoading}>
+                      {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
+                      Conectar
+                    </Button>
+                  )}
+                  {uiStatus === 'connected' && (
                     <>
-                      <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
-                        <Power className="mr-2 h-4 w-4" />
-                        Desconectar
-                      </Button>
-                      <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handlePause(connection)} disabled={apiLoading}>
+                      <Button variant="outline" size="sm" onClick={() => handlePause(connection)} disabled={apiLoading}>
                         <Pause className="mr-2 h-4 w-4" />
                         Pausar
                       </Button>
-                      <Button className="flex-1 bg-amber-500 hover:bg-amber-600 text-white" onClick={() => { setSelectedConnection(connection); setIsDeleteDialogOpen(true); }} disabled={isDeleting}>
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Excluir Conexão
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                        onClick={() => handleConnect(connection)}
-                        disabled={isSelectedAndConnecting || apiLoading}
-                      >
-                        {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
-                        {uiStatus === 'paused' ? 'Retomar' : 'Conectar'}
-                      </Button>
-<Button
-                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
-                        onClick={() => { setSelectedConnection(connection); setIsDeleteDialogOpen(true); }}
-                        disabled={isDeleting}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Excluir
+                      <Button variant="destructive" size="sm" onClick={() => handleDisconnect(connection)} disabled={apiLoading}>
+                        <PowerOff className="mr-2 h-4 w-4" />
+                        Desconectar
                       </Button>
                     </>
                   )}
+                  {uiStatus === 'connecting' && (
+                    <Button size="sm" variant="outline" disabled>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Conectando...
+                    </Button>
+                  )}
+                  {uiStatus === 'paused' && (
+                    <Button size="sm" onClick={() => handleResume(connection)} disabled={isSelectedAndConnecting || apiLoading}>
+                      {isSelectedAndConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
+                      Retomar
+                    </Button>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -531,10 +367,8 @@ export default function Connections() {
           Instância: <strong>{selectedConnection?.instance_name}</strong>
         </div>
         <div className="flex flex-col items-center justify-center space-y-4 min-h-[300px]">
-            {(isConnecting || apiLoading) && !qrCodeData && !pairingCode && !qrValue ? (
+            {(isConnecting || apiLoading) && !qrCodeData && !pairingCode ? (
               <><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="text-muted-foreground">Gerando QR Code...</p></>
-            ) : qrValue ? (
-              <><div className="relative p-4 bg-white rounded-lg"><div className="shadow-lg rounded-md overflow-hidden"><QRCode value={qrValue} size={256} bgColor="#ffffff" fgColor="#16a34a" /></div><img src="/placeholder-chat.svg" alt="Logo" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white p-1 shadow" /></div><p className="text-center text-sm text-muted-foreground">Escaneie o QR verde para conectar</p></>
             ) : qrCodeData ? (
               <><div className="p-4 bg-white rounded-lg"><img src={qrCodeData.startsWith('data:') ? qrCodeData : `data:image/png;base64,${qrCodeData}`} alt="QR Code" className="w-64 h-64"/></div><p className="text-center text-sm text-muted-foreground">Escaneie o código QR com o WhatsApp para conectar</p></>
             ) : pairingCode ? (

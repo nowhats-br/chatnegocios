@@ -54,10 +54,4 @@ export const API_ENDPOINTS = {
    * @param instanceName The name of the WhatsApp instance.
    */
   SEND_MEDIA: (instanceName: string) => `/message/sendMedia/${instanceName}`,
-
-  /**
-   * Endpoint to fetch a WhatsApp profile picture URL by number.
-   * @param instanceName The name of the WhatsApp instance.
-   */
-  CHAT_FETCH_PROFILE_PICTURE_URL: (instanceName: string) => `/chat/fetchProfilePictureUrl/${instanceName}`,
 };
