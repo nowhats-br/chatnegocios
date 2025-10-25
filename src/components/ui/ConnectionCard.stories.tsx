@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from '@storybook/test';
-import { ConnectionCard } from './ConnectionCard';
+import ConnectionCard from './ConnectionCard';
 
 // Mock connection data for different states
 const baseConnection = {

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from '@storybook/test';
-import { Button } from './Button';
+import Button from './Button';
 import { Loader2, Plus, Trash2, Download, Settings } from 'lucide-react';
 
 const meta = {
@@ -21,7 +21,7 @@ A versatile button component with multiple variants, sizes, and states. Built wi
 - **Flexible Sizing**: Small, default, large, and icon-only sizes
 - **Loading States**: Built-in loading spinner and text support
 - **Icon Support**: Left or right positioned icons
-- **Gradient Options**: Enhanced visual appeal with gradient backgrounds
+- **Variant Options**: Multiple visual styles including primary, secondary, destructive
 - **Accessibility**: Full keyboard navigation and screen reader support
 - **Performance**: Optimized animations with reduced motion support
 
@@ -57,19 +57,13 @@ The button component uses design tokens from our design system:
       control: { type: 'boolean' },
       description: 'Disables the button',
     },
-    gradient: {
-      control: { type: 'boolean' },
-      description: 'Applies gradient background styling',
-    },
+
     iconPosition: {
       control: { type: 'select' },
       options: ['left', 'right'],
       description: 'Position of the icon relative to text',
     },
-    loadingText: {
-      control: { type: 'text' },
-      description: 'Text to show when loading (optional)',
-    },
+
     onClick: { action: 'clicked' },
   },
   args: {
@@ -156,8 +150,7 @@ export const Loading: Story = {
 export const LoadingWithText: Story = {
   args: {
     loading: true,
-    loadingText: 'Processing...',
-    children: 'Submit',
+    children: 'Processing...',
   },
 };
 
@@ -185,18 +178,17 @@ export const WithRightIcon: Story = {
   },
 };
 
-// Gradient variants
-export const GradientPrimary: Story = {
+// Button variants
+export const PrimaryVariant: Story = {
   args: {
-    gradient: true,
-    children: 'Gradient Primary',
+    variant: 'default',
+    children: 'Primary Button',
   },
 };
 
-export const GradientDestructive: Story = {
+export const DestructiveVariant: Story = {
   args: {
     variant: 'destructive',
-    gradient: true,
     icon: Trash2,
     iconPosition: 'left',
     children: 'Delete Forever',
@@ -248,8 +240,8 @@ export const LoadingStates: Story = {
   render: () => (
     <div className="flex flex-wrap gap-4 p-4">
       <Button loading>Loading</Button>
-      <Button loading loadingText="Saving...">Save</Button>
-      <Button variant="destructive" loading loadingText="Deleting...">
+      <Button loading>Saving...</Button>
+      <Button variant="destructive" loading>
         Delete
       </Button>
       <Button variant="outline" loading>
@@ -291,25 +283,25 @@ export const WithIcons: Story = {
   },
 };
 
-export const GradientVariants: Story = {
+export const ButtonVariants: Story = {
   render: () => (
     <div className="flex flex-wrap gap-4 p-4">
-      <Button gradient>Gradient Primary</Button>
-      <Button variant="destructive" gradient>
-        Gradient Destructive
+      <Button>Default Button</Button>
+      <Button variant="destructive">
+        Destructive Button
       </Button>
-      <Button gradient icon={Plus} iconPosition="left">
-        Add with Gradient
+      <Button icon={Plus} iconPosition="left">
+        Add Item
       </Button>
-      <Button variant="destructive" gradient loading loadingText="Deleting...">
-        Loading Gradient
+      <Button variant="destructive" loading>
+        Loading Button
       </Button>
     </div>
   ),
   parameters: {
     docs: {
       description: {
-        story: 'Gradient button variants with enhanced visual appeal.',
+        story: 'Different button variants and states.',
       },
     },
   },

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { Button } from '../components/ui/Button';
-import { ConnectionCard } from '../components/ui/ConnectionCard';
+import Button from '../components/ui/Button';
+import ConnectionCard from '../components/ui/ConnectionCard';
 import { Plus, Settings, Trash2 } from 'lucide-react';
 
 const meta = {
@@ -276,7 +276,7 @@ export const ResponsivePatterns: Story = {
               {/* Mobile Header */}
               <div className="flex items-center justify-between p-4 bg-card rounded-lg">
                 <h4 className="typography-h4">Conexões</h4>
-                <Button size="sm" icon={Plus} size="icon" aria-label="Adicionar" />
+                <Button size="sm" icon={Plus} aria-label="Adicionar" />
               </div>
               
               {/* Mobile Cards - Single Column */}

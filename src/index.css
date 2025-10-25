@@ -1537,7 +1537,6 @@
             @apply hover:scale-105 hover:shadow-xl;
         }
     }
-}
 
 /* Global performance optimizations */
 @layer utilities {

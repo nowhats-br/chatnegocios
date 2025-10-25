@@ -10,6 +10,17 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      external: (id) => {
+        // Excluir arquivos de teste e stories problemáticos do build
+        return id.includes('.test.') || 
+               id.includes('.stories.') ||
+               id.includes('__tests__') ||
+               id.includes('/test/');
+      }
+    }
+  },
   server: {
     host: true,
     port: 5173,

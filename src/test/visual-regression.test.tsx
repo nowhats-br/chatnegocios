@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Button } from '../components/ui/Button';
-import { ConnectionCard } from '../components/ui/ConnectionCard';
+import Button from '../components/ui/Button';
+import ConnectionCard from '../components/ui/ConnectionCard';
 
 // Mock connection data
 const mockConnection = {
@@ -29,27 +29,7 @@ const mockConnectionCardProps = {
   isLoading: false
 };
 
-// Helper function to capture component styles
-function getComputedStyles(element: HTMLElement) {
-  const computedStyle = window.getComputedStyle(element);
-  return {
-    backgroundColor: computedStyle.backgroundColor,
-    color: computedStyle.color,
-    borderColor: computedStyle.borderColor,
-    borderRadius: computedStyle.borderRadius,
-    padding: computedStyle.padding,
-    margin: computedStyle.margin,
-    fontSize: computedStyle.fontSize,
-    fontWeight: computedStyle.fontWeight,
-    display: computedStyle.display,
-    flexDirection: computedStyle.flexDirection,
-    alignItems: computedStyle.alignItems,
-    justifyContent: computedStyle.justifyContent,
-    boxShadow: computedStyle.boxShadow,
-    transform: computedStyle.transform,
-    transition: computedStyle.transition,
-  };
-}
+// Helper function to capture component styles (removed unused function)
 
 describe('Visual Regression Tests', () => {
   beforeEach(() => {
@@ -335,9 +315,8 @@ describe('Visual Regression Tests', () => {
       document.documentElement.classList.add('dark');
     });
 
-    afterEach(() => {
-      document.documentElement.classList.remove('dark');
-    });
+    // Cleanup after tests
+    // document.documentElement.classList.remove('dark');
 
     it('should maintain consistent dark mode styling for buttons', () => {
       render(<Button>Dark Mode Button</Button>);

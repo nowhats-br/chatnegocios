@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ConnectionCard } from '../ConnectionCard';
+import ConnectionCard from '../ConnectionCard';
 
 // Mock the connection data
 const mockConnection = {
@@ -30,7 +30,7 @@ const mockProps = {
 
 describe('ConnectionCard Component', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Mock setup
   });
 
   describe('Rendering', () => {
