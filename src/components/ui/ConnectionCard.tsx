@@ -8,11 +8,28 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { useStatusAnnouncer, useStatusChangeAnnouncer, useKeyboardNavigation } from './AccessibilityUtils';
 import { cn } from '@/lib/utils';
 
+interface Connection {
+  id: string;
+  name: string;
+  status: string;
+  instance_data?: {
+    owner?: string;
+    pushName?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
 interface ConnectionCardProps {
-  instanceName: string;
-  phoneNumber: string;
-  status: StatusType;
+  // New format with connection object
+  connection?: Connection;
+  // Legacy format with individual props
+  instanceName?: string;
+  phoneNumber?: string;
+  status?: StatusType;
+  // Common props
   isLoading?: boolean;
+  isConnecting?: boolean;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onPause?: () => void;
@@ -23,10 +40,12 @@ interface ConnectionCardProps {
 }
 
 const ConnectionCard: React.FC<ConnectionCardProps> = ({
-  instanceName,
-  phoneNumber,
-  status,
+  connection,
+  instanceName: propInstanceName,
+  phoneNumber: propPhoneNumber,
+  status: propStatus,
   isLoading = false,
+  isConnecting = false,
   onConnect,
   onDisconnect,
   onPause,
@@ -35,6 +54,10 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   onDelete,
   className,
 }) => {
+  // Extract values from connection object or use individual props
+  const instanceName = connection?.name || propInstanceName || '';
+  const phoneNumber = connection?.instance_data?.owner || propPhoneNumber || '';
+  const status = (connection?.status as StatusType) || propStatus || 'disconnected';
   const { LiveRegionComponent } = useStatusAnnouncer();
   const { announceConnectionChange, announceLoadingState, announceAction } = useStatusChangeAnnouncer();
   const cardId = `connection-card-${(instanceName || 'unknown').replace(/[^a-zA-Z0-9]/g, '-')}`;
@@ -139,22 +162,22 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
       );
     }
 
-    if (status === 'connecting' || status === 'initializing') {
+    if (status === 'connecting' || status === 'initializing' || isConnecting) {
       return (
         <Button
           variant="outline"
           size="sm"
           disabled
           icon={Loader2}
-          aria-label={`Instância ${instanceName} está ${status === 'connecting' ? 'conectando' : 'inicializando'}`}
+          aria-label={`Instância ${instanceName} está ${status === 'connecting' || isConnecting ? 'conectando' : 'inicializando'}`}
           aria-describedby={statusId}
           className={cn(baseButtonClasses, "cursor-not-allowed")}
         >
           <span className="hidden sm:inline">
-            {status === 'connecting' ? 'Conectando...' : 'Inicializando...'}
+            {status === 'connecting' || isConnecting ? 'Conectando...' : 'Inicializando...'}
           </span>
           <span className="sm:hidden">
-            {status === 'connecting' ? 'Conectando' : 'Iniciando'}
+            {status === 'connecting' || isConnecting ? 'Conectando' : 'Iniciando'}
           </span>
         </Button>
       );

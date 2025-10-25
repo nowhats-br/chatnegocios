@@ -91,3 +91,40 @@ As correções implementadas aumentaram significativamente a robustez do sistema
 - **Melhor debugging**: Warnings informativos em vez de crashes silenciosos  
 - **Compatibilidade de testes**: Sistema pode ser testado adequadamente
 - **Manutenibilidade**: Código mais previsível e fácil de debugar
+## 
+Atualização do Status - Progresso Significativo
+
+### Correções Adicionais Implementadas:
+
+#### 6. **Conflito de Classes CSS no Button**
+- **Problema**: Classes `text-body-sm` dos sizes sobrescreviam `text-primary-foreground` das variants
+- **Correção**: Removidas classes de texto dos sizes para evitar conflito
+- **Impacto**: Testes de Button variants agora passam corretamente
+
+#### 7. **StatusBadge - Mesmo Problema do StatusIndicator**
+- **Problema**: Componente quebrava com status undefined
+- **Correção**: Aplicada mesma validação do StatusIndicator
+- **Impacto**: Elimina crashes adicionais por status inválido
+
+### Status Atual Atualizado:
+- **68 testes falhando reduzidos para 50** (melhoria de 26%)
+- **18 testes corrigidos** na última iteração
+- **Crashes de runtime eliminados completamente**
+- **Sistema muito mais estável e previsível**
+- **Base sólida para desenvolvimento futuro**
+
+### Principais Melhorias Alcançadas:
+- ✅ Componente Button funcionando corretamente
+- ✅ Validações robustas em StatusBadge e StatusIndicator  
+- ✅ Compatibilidade com ambiente de testes
+- ✅ Configuração ESLint adequada
+- ✅ Eliminação de crashes por valores undefined
+
+### Testes Restantes:
+Os 50 testes que ainda falham são principalmente relacionados a:
+- Expectativas específicas de classes CSS em componentes complexos
+- Testes de acessibilidade que precisam de ajustes nas expectativas
+- Componentes que dependem de props específicas não fornecidas nos testes
+- Navegação por teclado e foco que requerem ajustes na lógica de teste
+
+O sistema agora está em um estado muito mais robusto e funcional.

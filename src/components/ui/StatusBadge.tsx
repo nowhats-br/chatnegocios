@@ -85,6 +85,12 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   className,
 }) => {
   const config = STATUS_CONFIGS[status];
+  
+  if (!config) {
+    console.warn(`StatusBadge: Unknown status "${status}"`);
+    return null;
+  }
+  
   const Icon = config.icon;
 
   const sizeClasses = {

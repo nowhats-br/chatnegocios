@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Settings } from 'lucide-react';
 import Button from '../components/ui/Button';
 import ConnectionCard from '../components/ui/ConnectionCard';
 
@@ -203,10 +204,8 @@ describe('Accessibility Tests', () => {
 
   describe('Screen Reader Support', () => {
     it('should provide proper text alternatives', () => {
-      const TestIcon = () => <span data-testid="icon">📱</span>;
-      
       render(
-        <Button icon={TestIcon} size="icon" aria-label="Mobile Connection">
+        <Button icon={Settings} size="icon" aria-label="Mobile Connection">
           <span className="sr-only">Mobile Connection</span>
         </Button>
       );

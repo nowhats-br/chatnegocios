@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Settings } from 'lucide-react';
 import Button from '../Button';
 
 describe('Button Component', () => {
@@ -166,17 +167,16 @@ describe('Button Component', () => {
   });
 
   describe('Icons', () => {
-    const TestIcon = () => <span data-testid="test-icon">Icon</span>;
 
     it('renders left icon correctly', () => {
       render(
-        <Button icon={TestIcon} iconPosition="left">
+        <Button icon={Settings} iconPosition="left">
           Button with Icon
         </Button>
       );
       
-      const icon = screen.getByTestId('test-icon');
       const button = screen.getByRole('button');
+      const icon = button.querySelector('svg');
       
       expect(icon).toBeInTheDocument();
       expect(button).toHaveTextContent('Button with Icon');
@@ -184,20 +184,21 @@ describe('Button Component', () => {
 
     it('renders right icon correctly', () => {
       render(
-        <Button icon={TestIcon} iconPosition="right">
+        <Button icon={Settings} iconPosition="right">
           Button with Icon
         </Button>
       );
       
-      const icon = screen.getByTestId('test-icon');
+      const button = screen.getByRole('button');
+      const icon = button.querySelector('svg');
       expect(icon).toBeInTheDocument();
     });
 
     it('renders icon-only button correctly', () => {
-      render(<Button icon={TestIcon} size="icon" aria-label="Icon Button" />);
+      render(<Button icon={Settings} size="icon" aria-label="Icon Button" />);
       
-      const icon = screen.getByTestId('test-icon');
       const button = screen.getByRole('button');
+      const icon = button.querySelector('svg');
       
       expect(icon).toBeInTheDocument();
       expect(button).toHaveAttribute('aria-label', 'Icon Button');
