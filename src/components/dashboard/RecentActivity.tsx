@@ -43,11 +43,11 @@ const RecentActivity: React.FC = () => {
                 </div>
                 <div className="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
                   <div>
-                    <p className="text-sm text-foreground">
-                      <span className="font-medium">{activity.name}</span> {activity.action}
+                    <p className="typography-body-sm text-foreground">
+                      <span className="font-semibold">{activity.name}</span> {activity.action}
                     </p>
                   </div>
-                  <div className="whitespace-nowrap text-right text-sm text-muted-foreground">
+                  <div className="whitespace-nowrap text-right typography-body-sm typography-muted">
                     <time>{activity.time}</time>
                   </div>
                 </div>

@@ -73,8 +73,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
         ) : filteredConversations.length === 0 ? (
             <div className="text-center py-10 px-4">
               <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-4 text-lg font-medium">Nenhuma conversa encontrada</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <h3 className="mt-4 typography-h4">Nenhuma conversa encontrada</h3>
+              <p className="mt-2 typography-body typography-muted">
                 {searchTerm ? `Nenhum resultado para "${searchTerm}".` : `Não há conversas com o status "${activeFilter}".`}
               </p>
             </div>

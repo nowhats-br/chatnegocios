@@ -98,18 +98,18 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
         <div>
           <Label htmlFor="name">Nome do Produto</Label>
           <Input id="name" {...register('name')} className="mt-1" />
-          {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name.message}</p>}
+          {errors.name && <p className="typography-body-sm text-error mt-1">{errors.name.message}</p>}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="price">Preço (R$)</Label>
             <Input id="price" type="number" step="0.01" {...register('price')} className="mt-1" />
-            {errors.price && <p className="text-sm text-red-500 mt-1">{errors.price.message}</p>}
+            {errors.price && <p className="typography-body-sm text-error mt-1">{errors.price.message}</p>}
           </div>
           <div>
             <Label htmlFor="stock">Estoque</Label>
             <Input id="stock" type="number" {...register('stock')} className="mt-1" />
-            {errors.stock && <p className="text-sm text-red-500 mt-1">{errors.stock.message}</p>}
+            {errors.stock && <p className="typography-body-sm text-error mt-1">{errors.stock.message}</p>}
           </div>
         </div>
         <div>
@@ -119,7 +119,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, product, onS
         <div>
           <Label htmlFor="image_url">URL da Imagem (Opcional)</Label>
           <Input id="image_url" {...register('image_url')} className="mt-1" placeholder="https://..." />
-          {errors.image_url && <p className="text-sm text-red-500 mt-1">{errors.image_url.message}</p>}
+          {errors.image_url && <p className="typography-body-sm text-error mt-1">{errors.image_url.message}</p>}
         </div>
         <div className="flex justify-end space-x-2 pt-4">
           <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>

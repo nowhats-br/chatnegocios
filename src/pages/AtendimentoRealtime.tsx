@@ -233,8 +233,8 @@ const AtendimentoRealtime: React.FC = () => {
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <MessageSquareDashed className="w-24 h-24 text-muted-foreground/50" />
-            <h2 className="mt-6 text-xl font-semibold text-foreground">Nenhuma conversa selecionada</h2>
-            <p className="mt-2 text-muted-foreground">Selecione uma conversa na lista à esquerda para começar a atender.</p>
+            <h2 className="mt-6 typography-h3">Nenhuma conversa selecionada</h2>
+            <p className="mt-2 typography-body typography-muted">Selecione uma conversa na lista à esquerda para começar a atender.</p>
           </div>
         )}
       </div>

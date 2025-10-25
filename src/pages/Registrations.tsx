@@ -33,7 +33,7 @@ const Registrations: React.FC = () => {
 
   return (
     <div className="space-y-6">
-       <h1 className="text-3xl font-bold tracking-tight">Cadastros</h1>
+       <h1 className="typography-h1">Cadastros</h1>
       <Card>
         <div className="border-b">
           <Tabs className="px-6 overflow-x-auto whitespace-nowrap">

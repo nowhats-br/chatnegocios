@@ -72,7 +72,7 @@ const QuickResponseManager: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Mensagens Rápidas</h2>
+        <h2 className="typography-h3">Mensagens Rápidas</h2>
         <Button onClick={() => { setSelectedResponse(null); setFormOpen(true); }}>
           <PlusCircle className="mr-2 h-4 w-4" /> Nova Mensagem
         </Button>
@@ -84,8 +84,8 @@ const QuickResponseManager: React.FC = () => {
         ) : responses.length === 0 ? (
           <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">Nenhuma mensagem rápida</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Crie atalhos para agilizar seu atendimento.</p>
+            <h3 className="mt-4 typography-h4">Nenhuma mensagem rápida</h3>
+            <p className="mt-2 typography-body typography-muted">Crie atalhos para agilizar seu atendimento.</p>
           </div>
         ) : (
           <Table>

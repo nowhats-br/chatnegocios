@@ -37,18 +37,18 @@ const KanbanCard: React.FC<KanbanCardProps> = ({ conversation, isOverlay }) => {
       )}
     >
       <div className="flex justify-between items-start">
-        <p className="font-semibold text-sm mb-2 flex-1 break-words">{conversation.contacts?.name || 'Desconhecido'}</p>
+        <p className="typography-body-sm font-semibold mb-2 flex-1 break-words">{conversation.contacts?.name || 'Desconhecido'}</p>
         <div {...listeners} className="p-1 text-muted-foreground hover:bg-accent rounded-sm">
           <GripVertical className="h-4 w-4" />
         </div>
       </div>
       
-      <p className="text-xs text-muted-foreground mb-3">
+      <p className="typography-caption typography-muted mb-3">
         Última mensagem aqui...
       </p>
 
       <div className="flex justify-between items-center">
-        <p className="text-xs text-muted-foreground">
+        <p className="typography-caption typography-muted">
           {new Date(conversation.updated_at).toLocaleDateString('pt-BR')}
         </p>
         <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center">

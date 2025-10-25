@@ -19,7 +19,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ id, title, conversations })
       className="w-80 flex-shrink-0 bg-secondary rounded-lg flex flex-col"
     >
       <div className="p-4 border-b border-border">
-        <h3 className="font-semibold text-foreground">{title} <span className="text-sm text-muted-foreground">{conversations.length}</span></h3>
+        <h3 className="typography-h5 font-semibold text-foreground">{title} <span className="typography-body-sm typography-muted">{conversations.length}</span></h3>
       </div>
       <div className="flex-1 p-2 overflow-y-auto space-y-2">
         <SortableContext items={conversations.map(c => c.id)} strategy={verticalListSortingStrategy}>

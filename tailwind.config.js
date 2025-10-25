@@ -1,6 +1,4 @@
 /** @type {import('tailwindcss').Config} */
-import defaultTheme from 'tailwindcss/defaultTheme';
-
 export default {
   darkMode: 'class',
   content: [
@@ -9,8 +7,50 @@ export default {
   ],
   theme: {
     extend: {
+      screens: {
+        'xs': '475px',
+        '3xl': '1600px',
+      },
       fontFamily: {
-        sans: ['Inter', ...defaultTheme.fontFamily.sans],
+        sans: [
+          'Inter',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'Noto Sans',
+          'sans-serif',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
+          'Segoe UI Symbol',
+          'Noto Color Emoji'
+        ],
+        mono: [
+          'JetBrains Mono',
+          'Fira Code',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Monaco',
+          'Consolas',
+          'Liberation Mono',
+          'Courier New',
+          'monospace'
+        ],
+      },
+      fontWeight: {
+        thin: '100',
+        extralight: '200',
+        light: '300',
+        normal: '400',
+        medium: '500',
+        semibold: '600',
+        bold: '700',
+        extrabold: '800',
+        black: '900',
       },
       colors: {
         border: "hsl(var(--border))",
@@ -74,14 +114,34 @@ export default {
         },
       },
       fontSize: {
-        'display': ['3.5rem', { lineHeight: '1.1', fontWeight: '700' }],
-        'h1': ['2.5rem', { lineHeight: '1.2', fontWeight: '600' }],
-        'h2': ['2rem', { lineHeight: '1.3', fontWeight: '600' }],
-        'h3': ['1.5rem', { lineHeight: '1.4', fontWeight: '600' }],
-        'body-lg': ['1.125rem', { lineHeight: '1.6', fontWeight: '400' }],
-        'body': ['1rem', { lineHeight: '1.6', fontWeight: '400' }],
-        'body-sm': ['0.875rem', { lineHeight: '1.5', fontWeight: '400' }],
-        'caption': ['0.75rem', { lineHeight: '1.4', fontWeight: '500' }],
+        // Responsive typography with clamp functions
+        'display': ['clamp(2.5rem, 5vw, 3.5rem)', { lineHeight: '1.1', fontWeight: '700' }],
+        'h1': ['clamp(2rem, 4vw, 2.5rem)', { lineHeight: '1.2', fontWeight: '600' }],
+        'h2': ['clamp(1.75rem, 3.5vw, 2rem)', { lineHeight: '1.3', fontWeight: '600' }],
+        'h3': ['clamp(1.25rem, 2.5vw, 1.5rem)', { lineHeight: '1.4', fontWeight: '600' }],
+        'h4': ['clamp(1.125rem, 2vw, 1.25rem)', { lineHeight: '1.4', fontWeight: '600' }],
+        'h5': ['clamp(1rem, 1.5vw, 1.125rem)', { lineHeight: '1.5', fontWeight: '600' }],
+        'h6': ['clamp(0.875rem, 1.25vw, 1rem)', { lineHeight: '1.5', fontWeight: '600' }],
+        
+        // Body text with responsive scaling
+        'body-xl': ['clamp(1.25rem, 2vw, 1.375rem)', { lineHeight: '1.6', fontWeight: '400' }],
+        'body-lg': ['clamp(1.125rem, 1.5vw, 1.25rem)', { lineHeight: '1.6', fontWeight: '400' }],
+        'body': ['clamp(0.875rem, 1.25vw, 1rem)', { lineHeight: '1.6', fontWeight: '400' }],
+        'body-sm': ['clamp(0.75rem, 1vw, 0.875rem)', { lineHeight: '1.5', fontWeight: '400' }],
+        'body-xs': ['clamp(0.6875rem, 0.875vw, 0.75rem)', { lineHeight: '1.5', fontWeight: '400' }],
+        
+        // Specialized text styles
+        'lead': ['clamp(1.125rem, 1.75vw, 1.25rem)', { lineHeight: '1.7', fontWeight: '400' }],
+        'caption': ['clamp(0.6875rem, 0.875vw, 0.75rem)', { lineHeight: '1.4', fontWeight: '500' }],
+        'overline': ['clamp(0.625rem, 0.75vw, 0.6875rem)', { lineHeight: '1.3', fontWeight: '600', letterSpacing: '0.1em', textTransform: 'uppercase' }],
+        
+        // Static sizes for specific use cases
+        'display-static': ['3.5rem', { lineHeight: '1.1', fontWeight: '700' }],
+        'h1-static': ['2.5rem', { lineHeight: '1.2', fontWeight: '600' }],
+        'h2-static': ['2rem', { lineHeight: '1.3', fontWeight: '600' }],
+        'h3-static': ['1.5rem', { lineHeight: '1.4', fontWeight: '600' }],
+        'body-static': ['1rem', { lineHeight: '1.6', fontWeight: '400' }],
+        'caption-static': ['0.75rem', { lineHeight: '1.4', fontWeight: '500' }],
       },
       spacing: {
         '1': 'var(--space-1)',
@@ -134,6 +194,24 @@ export default {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.8' },
         },
+        'status-pulse': {
+          '0%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.7', transform: 'scale(1.05)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'status-glow': {
+          '0%, 100%': { boxShadow: '0 0 5px currentColor' },
+          '50%': { boxShadow: '0 0 20px currentColor, 0 0 30px currentColor' },
+        },
+        'status-breathe': {
+          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+          '50%': { transform: 'scale(1.1)', opacity: '0.8' },
+        },
+        'status-bounce': {
+          '0%, 20%, 50%, 80%, 100%': { transform: 'translateY(0)' },
+          '40%': { transform: 'translateY(-4px)' },
+          '60%': { transform: 'translateY(-2px)' },
+        },
       },
       animation: {
         'grid': 'grid 15s linear infinite',
@@ -141,6 +219,10 @@ export default {
         'scale-in': 'scale-in 0.2s ease-out',
         'slide-up': 'slide-up 0.4s ease-out',
         'pulse-subtle': 'pulse-subtle 2s ease-in-out infinite',
+        'status-pulse': 'status-pulse 2s ease-in-out infinite',
+        'status-glow': 'status-glow 2s ease-in-out infinite',
+        'status-breathe': 'status-breathe 3s ease-in-out infinite',
+        'status-bounce': 'status-bounce 2s infinite',
       },
     },
   },

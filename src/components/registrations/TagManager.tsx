@@ -72,7 +72,7 @@ const TagManager: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Gerenciar Etiquetas</h2>
+        <h2 className="typography-h3">Gerenciar Etiquetas</h2>
         <Button onClick={() => { setSelectedTag(null); setFormOpen(true); }}>
           <PlusCircle className="mr-2 h-4 w-4" /> Nova Etiqueta
         </Button>
@@ -84,8 +84,8 @@ const TagManager: React.FC = () => {
         ) : tags.length === 0 ? (
           <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">Nenhuma etiqueta cadastrada</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Crie etiquetas para organizar seus contatos e conversas.</p>
+            <h3 className="mt-4 typography-h4">Nenhuma etiqueta cadastrada</h3>
+            <p className="mt-2 typography-body typography-muted">Crie etiquetas para organizar seus contatos e conversas.</p>
           </div>
         ) : (
           <Table>

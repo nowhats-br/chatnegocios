@@ -51,34 +51,34 @@ const Login: React.FC = () => {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background dark:bg-grid-small-white/[0.2] bg-grid-small-black/[0.2]">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="w-full max-w-md p-8 space-y-8 glassmorphism rounded-xl shadow-2xl"
       >
         <div className="text-center">
-            <Command className="mx-auto h-12 w-12 text-primary" />
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={mode}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-              >
-                <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">
-                  {mode === 'signIn' ? 'Bem-vindo de volta!' : 'Crie sua conta'}
-                </h1>
-                <p className="mt-2 text-muted-foreground">
-                  {mode === 'signIn' ? 'Faça login para acessar o Chatvendas.' : 'Comece a gerenciar seus atendimentos.'}
-                </p>
-              </motion.div>
-            </AnimatePresence>
+          <Command className="mx-auto h-12 w-12 text-primary" />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={mode}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+            >
+              <h1 className="typography-h1 mt-4">
+                {mode === 'signIn' ? 'Bem-vindo de volta!' : 'Crie sua conta'}
+              </h1>
+              <p className="typography-body typography-muted mt-2">
+                {mode === 'signIn' ? 'Faça login para acessar o Chatvendas.' : 'Comece a gerenciar seus atendimentos.'}
+              </p>
+            </motion.div>
+          </AnimatePresence>
         </div>
         <form className="space-y-6" onSubmit={handleAuth}>
           <div>
-            <label htmlFor="email" className="text-sm font-medium text-muted-foreground">E-mail</label>
+            <label htmlFor="email" className="typography-body-sm font-semibold text-foreground">E-mail</label>
             <Input
               id="email"
               type="email"
@@ -90,7 +90,7 @@ const Login: React.FC = () => {
             />
           </div>
           <div>
-            <label htmlFor="password" className="text-sm font-medium text-muted-foreground">Senha</label>
+            <label htmlFor="password" className="typography-body-sm font-semibold text-foreground">Senha</label>
             <Input
               id="password"
               type="password"
@@ -106,7 +106,7 @@ const Login: React.FC = () => {
             {mode === 'signIn' ? 'Entrar' : 'Cadastrar'}
           </Button>
         </form>
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="typography-body-sm typography-muted text-center">
           {mode === 'signIn' ? 'Não tem uma conta?' : 'Já tem uma conta?'}
           <Button variant="link" onClick={() => setMode(mode === 'signIn' ? 'signUp' : 'signIn')}>
             {mode === 'signIn' ? 'Cadastre-se' : 'Faça login'}

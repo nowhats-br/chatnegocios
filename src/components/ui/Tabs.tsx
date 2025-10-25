@@ -18,7 +18,7 @@ export const TabsTrigger: React.FC<TabsTriggerProps> = ({ children, value, activ
   const isActive = value === activeValue;
   return (
     <button
-      className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors ${
+      className={`px-4 py-2 -mb-px typography-body-sm font-semibold border-b-2 transition-colors ${
         isActive
           ? 'border-primary text-primary'
           : 'border-transparent text-muted-foreground hover:text-foreground'

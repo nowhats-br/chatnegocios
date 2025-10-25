@@ -34,7 +34,7 @@ const Header: React.FC = () => {
           <input
             type="text"
             placeholder="Buscar..."
-            className="w-full md:w-64 pl-10 pr-4 py-2 rounded-lg bg-secondary border border-transparent focus:bg-background focus:border-primary focus:outline-none transition-all"
+            className="typography-body w-full md:w-64 pl-10 pr-4 py-2 rounded-lg bg-secondary border border-transparent focus:bg-background focus:border-primary focus:outline-none transition-all"
           />
         </div>
         <Button onClick={toggleTheme} variant="ghost" size="icon">
@@ -48,7 +48,7 @@ const Header: React.FC = () => {
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center text-primary-foreground font-bold focus:outline-none ring-2 ring-offset-2 ring-offset-background ring-primary">
+            <button className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center text-primary-foreground typography-body font-bold focus:outline-none ring-2 ring-offset-2 ring-offset-background ring-primary">
               {userInitial}
             </button>
           </DropdownMenuTrigger>

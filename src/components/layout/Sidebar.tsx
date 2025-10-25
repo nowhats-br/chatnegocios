@@ -40,7 +40,7 @@ const Sidebar: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, delay: 0.1 }}
-              className="font-bold text-lg ml-3"
+              className="typography-h4 font-bold ml-3"
             >
               Chatvendas
             </motion.span>
@@ -71,7 +71,7 @@ const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-4 font-medium text-sm"
+                  className="ml-4 typography-body-sm font-semibold"
                 >
                   {item.label}
                 </motion.span>
@@ -101,7 +101,7 @@ const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-4 font-medium text-sm"
+                  className="ml-4 typography-body-sm font-semibold"
                 >
                   Configurações
                 </motion.span>

@@ -78,7 +78,7 @@ const TeamManager: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Equipes de Atendimento</h2>
+        <h2 className="typography-h3">Equipes de Atendimento</h2>
         <Button onClick={() => { setSelectedTeam({ name: '', description: '' }); setFormOpen(true); }}>
           <PlusCircle className="mr-2 h-4 w-4" /> Nova Equipe
         </Button>
@@ -88,8 +88,8 @@ const TeamManager: React.FC = () => {
         : teams.length === 0 ? (
           <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">Nenhuma equipe cadastrada</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Crie equipes para organizar seus usuários.</p>
+            <h3 className="mt-4 typography-h4">Nenhuma equipe cadastrada</h3>
+            <p className="mt-2 typography-body typography-muted">Crie equipes para organizar seus usuários.</p>
           </div>
         ) : (
           <Table>

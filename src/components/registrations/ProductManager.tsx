@@ -73,7 +73,7 @@ const ProductManager: React.FC = () => {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Seu Catálogo de Produtos</h2>
+        <h2 className="typography-h3">Seu Catálogo de Produtos</h2>
         <Button onClick={() => { setSelectedProduct(null); setFormOpen(true); }}>
           <PlusCircle className="mr-2 h-4 w-4" /> Novo Produto
         </Button>
@@ -85,8 +85,8 @@ const ProductManager: React.FC = () => {
         ) : products.length === 0 ? (
           <div className="text-center py-10">
             <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">Nenhum produto cadastrado</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Comece adicionando seu primeiro item ao catálogo.</p>
+            <h3 className="mt-4 typography-h4">Nenhum produto cadastrado</h3>
+            <p className="mt-2 typography-body typography-muted">Comece adicionando seu primeiro item ao catálogo.</p>
           </div>
         ) : (
           <Table>
@@ -111,7 +111,7 @@ const ProductManager: React.FC = () => {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="font-semibold">{product.name}</TableCell>
                   <TableCell>{formatCurrency(product.price)}</TableCell>
                   <TableCell>{product.stock}</TableCell>
                   <TableCell>

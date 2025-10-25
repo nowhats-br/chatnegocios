@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -139,19 +141,51 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground;
+  
+  html {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-variant-ligatures: common-ligatures;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
+  
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  
   .dark body {
     background-color: hsl(var(--background));
     background-image: radial-gradient(circle at 1px 1px, hsl(var(--foreground) / 0.05) 1px, transparent 0);
     background-size: 1.5rem 1.5rem;
   }
+
+  /* Typography base styles */
+  h1, h2, h3, h4, h5, h6 {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-variant-numeric: lining-nums;
+  }
+
+  /* Improve text contrast and readability */
+  p, span, div {
+    text-wrap: pretty;
+  }
+
+  /* Better focus styles for typography elements */
+  h1:focus-visible, h2:focus-visible, h3:focus-visible, 
+  h4:focus-visible, h5:focus-visible, h6:focus-visible {
+    @apply outline-none ring-2 ring-primary/50 ring-offset-2 ring-offset-background rounded-sm;
+  }
 }
 
 @layer components {
     .glassmorphism {
-        @apply bg-card/60 backdrop-blur-xl border border-white/10;
+        @apply bg-card/60 backdrop-blur-xl border border-white/10 dark:border-white/5;
+    }
+
+    .glassmorphism-enhanced {
+        @apply bg-card/70 backdrop-blur-2xl border border-white/20 dark:border-white/10 shadow-lg;
     }
 
     /* Modern button base styles */
@@ -169,19 +203,40 @@
 
     /* Enhanced card variants */
     .card-elevated {
-        @apply bg-card border border-border shadow-lg hover:shadow-xl transition-all duration-300;
+        @apply bg-card border border-border/50 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300;
     }
 
     .card-outlined {
-        @apply bg-card border-2 border-border hover:border-primary/50 transition-all duration-200;
+        @apply bg-card border-2 border-border hover:border-primary/50 hover:shadow-md hover:scale-[1.01] transition-all duration-300;
     }
 
     .card-glass {
-        @apply glassmorphism shadow-lg hover:shadow-xl transition-all duration-300;
+        @apply glassmorphism shadow-lg hover:shadow-xl hover:scale-[1.02] hover:bg-card/70 hover:backdrop-blur-2xl transition-all duration-300;
     }
 
     .card-interactive {
-        @apply hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 cursor-pointer;
+        @apply cursor-pointer transition-all duration-300;
+    }
+
+    .card-interactive:hover {
+        @apply scale-[1.02] -translate-y-1 shadow-xl;
+    }
+
+    .card-interactive:active {
+        @apply scale-[0.98] translate-y-0 shadow-lg;
+    }
+
+    /* Card state modifiers */
+    .card-hover-subtle {
+        @apply hover:shadow-md hover:scale-[1.01] hover:-translate-y-0.5 transition-all duration-300;
+    }
+
+    .card-hover-prominent {
+        @apply hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300;
+    }
+
+    .card-active-feedback {
+        @apply active:scale-[0.99] active:translate-y-0 transition-all duration-150;
     }
 
     /* Status indicator styles */
@@ -206,9 +261,237 @@
         @apply bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent;
     }
 
+    .text-gradient-success {
+        @apply bg-gradient-to-r from-success to-success/80 bg-clip-text text-transparent;
+    }
+
+    .text-gradient-warning {
+        @apply bg-gradient-to-r from-warning to-warning/80 bg-clip-text text-transparent;
+    }
+
+    /* Typography component classes */
+    .typography-display {
+        @apply text-display font-bold tracking-tight text-foreground;
+    }
+
+    .typography-h1 {
+        @apply text-h1 font-semibold tracking-tight text-foreground;
+    }
+
+    .typography-h2 {
+        @apply text-h2 font-semibold tracking-tight text-foreground;
+    }
+
+    .typography-h3 {
+        @apply text-h3 font-semibold tracking-tight text-foreground;
+    }
+
+    .typography-h4 {
+        @apply text-h4 font-semibold tracking-tight text-foreground;
+    }
+
+    .typography-h5 {
+        @apply text-h5 font-semibold text-foreground;
+    }
+
+    .typography-h6 {
+        @apply text-h6 font-semibold text-foreground;
+    }
+
+    .typography-lead {
+        @apply text-lead text-muted-foreground;
+    }
+
+    .typography-body-xl {
+        @apply text-body-xl text-foreground;
+    }
+
+    .typography-body-lg {
+        @apply text-body-lg text-foreground;
+    }
+
+    .typography-body {
+        @apply text-body text-foreground;
+    }
+
+    .typography-body-sm {
+        @apply text-body-sm text-foreground;
+    }
+
+    .typography-body-xs {
+        @apply text-body-xs text-muted-foreground;
+    }
+
+    .typography-caption {
+        @apply text-caption text-muted-foreground font-medium;
+    }
+
+    .typography-overline {
+        @apply text-overline text-muted-foreground font-semibold;
+    }
+
+    /* Typography with semantic colors */
+    .typography-muted {
+        @apply text-muted-foreground;
+    }
+
+    .typography-subtle {
+        @apply text-foreground/70;
+    }
+
+    .typography-success {
+        @apply text-success;
+    }
+
+    .typography-warning {
+        @apply text-warning;
+    }
+
+    .typography-error {
+        @apply text-error;
+    }
+
+    .typography-info {
+        @apply text-info;
+    }
+
+    /* Reading optimized typography */
+    .typography-prose {
+        @apply text-body leading-relaxed text-foreground max-w-prose;
+    }
+
+    .typography-prose h1 {
+        @apply typography-h1 mt-8 mb-4 first:mt-0;
+    }
+
+    .typography-prose h2 {
+        @apply typography-h2 mt-6 mb-3;
+    }
+
+    .typography-prose h3 {
+        @apply typography-h3 mt-5 mb-2;
+    }
+
+    .typography-prose p {
+        @apply typography-body mb-4;
+    }
+
+    .typography-prose ul, .typography-prose ol {
+        @apply typography-body mb-4 pl-6;
+    }
+
+    .typography-prose li {
+        @apply mb-1;
+    }
+
+    /* Responsive typography helpers */
+    .typography-responsive-display {
+        @apply text-display;
+        font-size: clamp(2.5rem, 5vw, 3.5rem);
+    }
+
+    .typography-responsive-title {
+        @apply text-h1;
+        font-size: clamp(1.75rem, 4vw, 2.5rem);
+    }
+
+    .typography-responsive-subtitle {
+        @apply text-h2;
+        font-size: clamp(1.5rem, 3vw, 2rem);
+    }
+
+    .typography-responsive-body {
+        @apply text-body;
+        font-size: clamp(0.875rem, 1.25vw, 1rem);
+    }
+
     /* Focus ring utilities */
     .focus-ring {
         @apply focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-background;
+    }
+
+    /* Enhanced focus styles for buttons */
+    .btn-focus-ring {
+        @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary/50;
+    }
+
+    .btn-focus-ring-destructive {
+        @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-destructive/50;
+    }
+
+    .btn-focus-ring-success {
+        @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-success/50;
+    }
+
+    /* Reduced motion support */
+    @media (prefers-reduced-motion: reduce) {
+        .btn-reduced-motion {
+            @apply transition-none;
+        }
+        
+        .btn-reduced-motion:hover {
+            @apply scale-100;
+        }
+        
+        .btn-reduced-motion:active {
+            @apply scale-100;
+        }
+    }
+
+    /* Enhanced responsive grid utilities */
+    .grid-responsive-cards {
+        @apply grid auto-rows-fr items-stretch;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    /* Mobile-optimized touch targets */
+    .touch-target-mobile {
+        @apply min-h-[44px] min-w-[44px];
+    }
+
+    .touch-target-desktop {
+        @apply sm:min-h-[36px] sm:min-w-[36px];
+    }
+
+    /* Enhanced card responsive behavior */
+    .card-responsive {
+        @apply min-h-[280px] sm:min-h-[300px] lg:min-h-[320px];
+        @apply transform-gpu transition-all duration-300 ease-out;
+        @apply touch-manipulation select-none;
+    }
+
+    .card-responsive:hover {
+        @apply hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1;
+    }
+
+    .card-responsive:active {
+        @apply active:scale-[0.98] active:translate-y-0 active:shadow-lg;
+    }
+
+    /* Mobile-first responsive spacing */
+    .spacing-responsive-sm {
+        @apply space-y-3 sm:space-y-4 lg:space-y-5;
+    }
+
+    .spacing-responsive-md {
+        @apply space-y-4 sm:space-y-5 lg:space-y-6;
+    }
+
+    .spacing-responsive-lg {
+        @apply space-y-5 sm:space-y-6 lg:space-y-8;
+    }
+
+    /* Enhanced gap utilities for responsive grids */
+    .gap-responsive-sm {
+        @apply gap-4 xs:gap-5 sm:gap-6 lg:gap-7 xl:gap-8;
+    }
+
+    .gap-responsive-md {
+        @apply gap-5 xs:gap-6 sm:gap-7 lg:gap-8 xl:gap-10;
+    }
+
+    .gap-responsive-lg {
+        @apply gap-6 xs:gap-7 sm:gap-8 lg:gap-10 xl:gap-12;
     }
 
     /* Animation utilities */
@@ -222,5 +505,36 @@
 
     .animate-slide-up {
         @apply animate-slide-up;
+    }
+
+    /* Status indicator animations */
+    .animate-status-pulse {
+        animation: status-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    .animate-status-glow {
+        animation: status-glow 3s ease-in-out infinite;
+    }
+
+    @keyframes status-pulse {
+        0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+        }
+        50% {
+            opacity: 0.7;
+            transform: scale(1.05);
+        }
+    }
+
+    @keyframes status-glow {
+        0%, 100% {
+            opacity: 0.3;
+            transform: scale(1);
+        }
+        50% {
+            opacity: 0.8;
+            transform: scale(1.2);
+        }
     }
 }

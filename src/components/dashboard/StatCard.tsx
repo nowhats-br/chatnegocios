@@ -17,12 +17,12 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, change, c
   return (
     <Card className={cn("glassmorphism border-l-4", borderColor)}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="typography-body-sm font-medium typography-muted">{title}</CardTitle>
         <Icon className={cn("h-5 w-5", color)} />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        <p className="text-xs text-muted-foreground flex items-center">
+        <div className="typography-h2 font-bold">{value}</div>
+        <p className="typography-caption typography-muted flex items-center">
           <span className={`flex items-center mr-1 ${changeType === 'increase' ? 'text-green-500' : 'text-red-500'}`}>
             {changeType === 'increase' ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
             {change}

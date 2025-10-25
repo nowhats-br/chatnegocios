@@ -37,7 +37,7 @@ const Settings: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+      <h1 className="typography-h1">Configurações</h1>
       <Card>
         <CardHeader>
           <CardTitle>Configuração da API Evolution</CardTitle>
@@ -57,7 +57,7 @@ const Settings: React.FC = () => {
                   {...register('apiUrl')}
                   className="mt-1"
                 />
-                {errors.apiUrl && <p className="text-sm text-red-500 mt-1">{errors.apiUrl.message}</p>}
+                {errors.apiUrl && <p className="typography-body-sm text-error mt-1">{errors.apiUrl.message}</p>}
               </div>
               <div>
                 <Label htmlFor="apiKey">Chave de API (apikey)</Label>
@@ -68,7 +68,7 @@ const Settings: React.FC = () => {
                   {...register('apiKey')}
                   className="mt-1"
                 />
-                {errors.apiKey && <p className="text-sm text-red-500 mt-1">{errors.apiKey.message}</p>}
+                {errors.apiKey && <p className="typography-body-sm text-error mt-1">{errors.apiKey.message}</p>}
               </div>
               <div className="pt-2">
                 <Button type="submit" disabled={isSubmitting}>
@@ -87,7 +87,7 @@ const Settings: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-             <p className="text-sm text-muted-foreground">A funcionalidade de atualização via UI foi desabilitada nesta versão. Para atualizar, use os comandos `git pull` no servidor.</p>
+             <p className="typography-body-sm typography-muted">A funcionalidade de atualização via UI foi desabilitada nesta versão. Para atualizar, use os comandos `git pull` no servidor.</p>
           </div>
         </CardContent>
       </Card>
