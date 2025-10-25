@@ -91,6 +91,12 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   className,
 }) => {
   const config = STATUS_INDICATOR_CONFIGS[status];
+  
+  if (!config) {
+    console.warn(`StatusIndicator: Unknown status "${status}"`);
+    return null;
+  }
+  
   const Icon = config.icon;
 
   const sizeClasses = {

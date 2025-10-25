@@ -71,11 +71,15 @@ export function useAnimationPerformance(options: AnimationPerformanceOptions = {
     }
     
     lastTimeRef.current = now;
-    animationIdRef.current = requestAnimationFrame(measureFrame);
+    
+    // Check if requestAnimationFrame is available (for test environments)
+    if (typeof requestAnimationFrame !== 'undefined') {
+      animationIdRef.current = requestAnimationFrame(measureFrame);
+    }
   }, [enabled, threshold, onPerformanceWarning]);
 
   const startMonitoring = useCallback(() => {
-    if (!enabled) return;
+    if (!enabled || typeof requestAnimationFrame === 'undefined') return;
     
     frameCountRef.current = 0;
     lastTimeRef.current = performance.now();
@@ -84,7 +88,7 @@ export function useAnimationPerformance(options: AnimationPerformanceOptions = {
   }, [enabled, measureFrame]);
 
   const stopMonitoring = useCallback(() => {
-    if (animationIdRef.current) {
+    if (animationIdRef.current && typeof cancelAnimationFrame !== 'undefined') {
       cancelAnimationFrame(animationIdRef.current);
       animationIdRef.current = undefined;
     }

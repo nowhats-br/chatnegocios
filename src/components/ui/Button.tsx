@@ -8,6 +8,8 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' | 'gradient' | 'gradient-destructive' | 'gradient-success';
   size?: 'default' | 'sm' | 'lg' | 'icon' | 'icon-sm' | 'icon-lg';
   loading?: boolean;
+  loadingText?: string;
+  gradient?: boolean;
   icon?: LucideIcon;
   iconPosition?: 'left' | 'right';
   'aria-label'?: string;
@@ -19,15 +21,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  default: 'btn-contrast-primary shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  destructive: 'btn-contrast-destructive shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  outline: 'border border-input bg-background text-contrast-aa hover:bg-accent hover:text-accent-foreground hover:border-primary/50 hover:shadow-sm hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-none',
-  secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  ghost: 'text-contrast-aa hover:bg-accent hover:text-accent-foreground hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100',
-  link: 'text-primary underline-offset-4 hover:underline hover:text-primary/80 transition-all duration-200',
-  gradient: 'btn-contrast-primary bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-primary-600 hover:to-primary-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
-  'gradient-destructive': 'btn-contrast-destructive bg-gradient-to-r from-destructive to-red-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-red-600 hover:to-red-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
-  'gradient-success': 'btn-contrast-success bg-gradient-to-r from-success to-green-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-green-600 hover:to-green-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
+  default: 'bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-200',
+  destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors duration-200',
+  outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors duration-200',
+  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors duration-200',
+  ghost: 'hover:bg-accent hover:text-accent-foreground transition-colors duration-200',
+  link: 'text-primary underline-offset-4 hover:underline transition-colors duration-200',
+  gradient: 'bg-gradient-primary text-primary-foreground hover:bg-gradient-primary/90 transition-colors duration-200',
+  'gradient-destructive': 'bg-gradient-destructive text-destructive-foreground hover:bg-gradient-destructive/90 transition-colors duration-200',
+  'gradient-success': 'bg-gradient-success text-success-foreground hover:bg-gradient-success/90 transition-colors duration-200',
 };
 
 const sizes = {
@@ -46,6 +48,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     size = 'default', 
     asChild = false, 
     loading = false,
+    loadingText,
+    gradient = false,
     icon: Icon,
     iconPosition = 'left',
     children,
@@ -60,6 +64,12 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   }, ref) => {
     const Comp = asChild ? Slot : 'button';
     const isDisabled = disabled || loading;
+    
+    // Determine the actual variant to use
+    const actualVariant = gradient ? 
+      (variant === 'destructive' ? 'gradient-destructive' : 
+       variant === 'secondary' ? 'gradient' : 'gradient') : 
+      variant;
     
     // Dynamic icon sizing based on button size
     const getIconSize = (size: string) => {
@@ -78,7 +88,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const iconSize = getIconSize(size);
     
     const iconElement = loading ? (
-      <Loader2 className={cn(iconSize, 'animate-spin')} aria-hidden="true" />
+      <Loader2 className={cn(iconSize, 'animate-spin')} aria-hidden="true" data-testid="loading-spinner" />
     ) : Icon ? (
       <Icon className={cn(iconSize)} aria-hidden="true" />
     ) : null;
@@ -90,22 +100,22 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       switch (variant) {
         case 'gradient':
         case 'default':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'destructive':
         case 'gradient-destructive':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'gradient-success':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-success focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'secondary':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'outline':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'ghost':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         case 'link':
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:rounded-sm`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
         default:
-          return `${baseRing} focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background`;
+          return `${baseRing} focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
       }
     };
 
@@ -159,9 +169,9 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           // Reduced motion support
           'motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100 motion-reduce:hover:shadow-none',
           // Apply variant-specific styles
-          getFocusRingStyles(variant),
-          getDisabledStyles(variant),
-          variants[variant],
+          getFocusRingStyles(actualVariant),
+          getDisabledStyles(actualVariant),
+          variants[actualVariant],
           sizes[size],
           className
         )}
@@ -204,17 +214,23 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         
         {/* Enhanced content accessibility for icon buttons */}
-        <span className={cn(
-          loading && !children ? 'sr-only' : undefined,
-          // Better accessibility for icon-only buttons
-          (size === 'icon' || size === 'icon-sm' || size === 'icon-lg') && !children ? 'sr-only' : undefined
-        )}>
-          {/* Provide accessible text for icon-only buttons */}
-          {(size === 'icon' || size === 'icon-sm' || size === 'icon-lg') && !children && ariaLabel ? 
-            ariaLabel : 
-            children
-          }
-        </span>
+        {!asChild && (
+          <span className={cn(
+            loading && !children ? 'sr-only' : undefined,
+            // Better accessibility for icon-only buttons
+            (size === 'icon' || size === 'icon-sm' || size === 'icon-lg') && !children ? 'sr-only' : undefined
+          )}>
+            {/* Show loading text if provided, otherwise show children */}
+            {loading && loadingText ? loadingText : 
+             (size === 'icon' || size === 'icon-sm' || size === 'icon-lg') && !children && ariaLabel ? 
+              ariaLabel : 
+              children
+            }
+          </span>
+        )}
+        
+        {/* For asChild, render children directly */}
+        {asChild && children}
         
         {iconElement && iconPosition === 'right' && (
           <span className={cn(
