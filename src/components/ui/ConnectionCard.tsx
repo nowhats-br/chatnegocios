@@ -5,6 +5,7 @@ import Button from './Button';
 import StatusBadge, { StatusType } from './StatusBadge';
 import StatusIndicator from './StatusIndicator';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './DropdownMenu';
+import { useStatusAnnouncer, useStatusChangeAnnouncer, useKeyboardNavigation } from './AccessibilityUtils';
 import { cn } from '@/lib/utils';
 
 interface ConnectionCardProps {
@@ -34,16 +35,64 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   onDelete,
   className,
 }) => {
+  const { LiveRegionComponent } = useStatusAnnouncer();
+  const { announceConnectionChange, announceLoadingState, announceAction } = useStatusChangeAnnouncer();
+  const cardId = `connection-card-${instanceName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+  const statusId = `${cardId}-status`;
+  const actionsId = `${cardId}-actions`;
+  const previousStatus = React.useRef<StatusType>(status);
+
+  // Enhanced status change announcements with better context
+  React.useEffect(() => {
+    if (previousStatus.current !== status) {
+      announceConnectionChange(instanceName, status, previousStatus.current);
+      previousStatus.current = status;
+    }
+  }, [status, instanceName, announceConnectionChange]);
+
+  // Announce loading states for better user feedback
+  React.useEffect(() => {
+    if (isLoading) {
+      const action = status === 'connecting' ? 'connect' : 
+                   status === 'disconnected' ? 'disconnect' : 'update';
+      announceLoadingState(action, `instância ${instanceName}`, true);
+    }
+  }, [isLoading, status, instanceName, announceLoadingState]);
+
+  // Enhanced keyboard navigation for the card
+  const { handleKeyDown } = useKeyboardNavigation(
+    () => {
+      // Enter key - trigger primary action
+      const primaryButton = document.querySelector(`#${cardId} [data-primary-action="true"]`) as HTMLButtonElement;
+      if (primaryButton && !primaryButton.disabled) {
+        primaryButton.click();
+      }
+    },
+    undefined, // Escape - handled by parent
+    undefined, // Arrow keys handled by grid navigation
+    undefined,
+    undefined,
+    undefined,
+    {
+      preventDefault: false, // Let grid navigation handle arrows
+      stopPropagation: false
+    }
+  );
   const renderPrimaryAction = () => {
     const baseButtonClasses = cn(
-      // Enhanced mobile touch targets
-      "min-h-[44px] w-full xs:w-auto xs:min-w-[100px] sm:min-w-[110px]",
-      // Better responsive text sizing
-      "text-sm sm:text-base font-medium",
-      // Enhanced touch feedback
-      "active:scale-95 transition-all duration-200",
-      // Improved focus accessibility
-      "focus-visible:ring-2 focus-visible:ring-offset-2"
+      // Comprehensive mobile touch targets with WCAG AA compliance
+      "touch-target-primary",
+      // Enhanced responsive width optimization for different screen sizes
+      "w-full xs:w-auto xs:min-w-[100px] sm:min-w-[110px] md:min-w-[120px] lg:min-w-[110px]",
+      // Optimized responsive text sizing with better readability
+      "text-sm sm:text-base lg:text-sm xl:text-base font-medium",
+      // Enhanced touch feedback with comprehensive motion support
+      "active:scale-95 transition-all duration-200 ease-out",
+      "motion-reduce:active:scale-100 motion-reduce:transition-none",
+      // Comprehensive accessibility enhancements
+      "focus-ring-enhanced keyboard-navigable",
+      // Better interaction area optimization for mobile
+      "interaction-area-mobile sm:interaction-area-desktop"
     );
 
     if (status === 'disconnected') {
@@ -51,12 +100,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         <Button
           variant="gradient-success"
           size="sm"
-          onClick={onConnect}
+          onClick={() => {
+            onConnect?.();
+            announceAction('connect', `instância ${instanceName}`, 'pending');
+          }}
           disabled={isLoading}
           loading={isLoading}
           icon={Power}
           aria-label={`Conectar instância ${instanceName}`}
-          className={baseButtonClasses}
+          aria-describedby={statusId}
+          data-primary-action="true"
+          className={cn(baseButtonClasses, "btn-contrast-success focus-ring-success")}
         >
           Conectar
         </Button>
@@ -68,12 +122,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         <Button
           variant="gradient-destructive"
           size="sm"
-          onClick={onDisconnect}
+          onClick={() => {
+            onDisconnect?.();
+            announceAction('disconnect', `instância ${instanceName}`, 'pending');
+          }}
           disabled={isLoading}
           loading={isLoading}
           icon={PowerOff}
           aria-label={`Desconectar instância ${instanceName}`}
-          className={baseButtonClasses}
+          aria-describedby={statusId}
+          data-primary-action="true"
+          className={cn(baseButtonClasses, "btn-contrast-destructive focus-ring-destructive")}
         >
           Desconectar
         </Button>
@@ -87,11 +146,16 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
           size="sm"
           disabled
           icon={Loader2}
-          aria-label={`Instância ${instanceName} conectando`}
+          aria-label={`Instância ${instanceName} está ${status === 'connecting' ? 'conectando' : 'inicializando'}`}
+          aria-describedby={statusId}
           className={cn(baseButtonClasses, "cursor-not-allowed")}
         >
-          <span className="hidden sm:inline">Conectando...</span>
-          <span className="sm:hidden">Conectando</span>
+          <span className="hidden sm:inline">
+            {status === 'connecting' ? 'Conectando...' : 'Inicializando...'}
+          </span>
+          <span className="sm:hidden">
+            {status === 'connecting' ? 'Conectando' : 'Iniciando'}
+          </span>
         </Button>
       );
     }
@@ -101,12 +165,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         <Button
           variant="gradient"
           size="sm"
-          onClick={onResume}
+          onClick={() => {
+            onResume?.();
+            announceAction('resume', `instância ${instanceName}`, 'pending');
+          }}
           disabled={isLoading}
           loading={isLoading}
           icon={Play}
           aria-label={`Retomar instância ${instanceName}`}
-          className={baseButtonClasses}
+          aria-describedby={statusId}
+          data-primary-action="true"
+          className={cn(baseButtonClasses, "btn-contrast-primary focus-ring-enhanced")}
         >
           Retomar
         </Button>
@@ -122,22 +191,32 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         <Button
           variant="outline"
           size="sm"
-          onClick={onPause}
+          onClick={() => {
+            onPause?.();
+            announceAction('pause', `instância ${instanceName}`, 'pending');
+          }}
           disabled={isLoading}
           icon={Pause}
           aria-label={`Pausar instância ${instanceName}`}
+          aria-describedby={statusId}
           className={cn(
-            // Enhanced mobile touch targets
-            "min-h-[44px] w-full xs:w-auto xs:min-w-[90px]",
-            // Better responsive text sizing
-            "text-sm sm:text-base font-medium",
-            // Enhanced touch feedback
-            "active:scale-95 transition-all duration-200",
-            // Improved focus accessibility
-            "focus-visible:ring-2 focus-visible:ring-offset-2"
+            // Comprehensive mobile touch targets with WCAG AA compliance
+            "touch-target-secondary",
+            // Enhanced responsive width optimization
+            "w-full xs:w-auto xs:min-w-[90px] sm:min-w-[100px] md:min-w-[110px] lg:min-w-[100px]",
+            // Optimized responsive text sizing
+            "text-sm sm:text-base lg:text-sm xl:text-base font-medium",
+            // Enhanced touch feedback with comprehensive motion support
+            "active:scale-95 transition-all duration-200 ease-out",
+            "motion-reduce:active:scale-100 motion-reduce:transition-none",
+            // Comprehensive accessibility enhancements
+            "focus-ring-enhanced keyboard-navigable",
+            // Better interaction area optimization
+            "interaction-area-mobile sm:interaction-area-desktop"
           )}
         >
-          Pausar
+          <span className="hidden sm:inline lg:hidden xl:inline">Pausar</span>
+          <span className="sm:hidden lg:inline xl:hidden">Pause</span>
         </Button>
       );
     }
@@ -145,28 +224,48 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   };
 
   return (
-    <Card
-      variant="elevated"
-      interactive
-      className={cn(
-        'relative overflow-hidden group transition-all duration-300',
-        // Enhanced responsive hover states
-        'hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1',
-        // Touch-friendly active states with better feedback
-        'active:scale-[0.98] active:translate-y-0 active:shadow-lg',
-        // Mobile-optimized touch interactions
-        'touch-manipulation select-none',
-        // Improved responsive sizing and spacing
-        'h-full w-full flex flex-col',
-        // Enhanced accessibility for keyboard navigation
-        'focus-within:ring-2 focus-within:ring-primary/20 focus-within:ring-offset-2',
-        'focus-within:ring-offset-background',
-        // Reduced motion support
-        'motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0',
-        'motion-reduce:active:scale-100 motion-reduce:transition-none',
-        className
-      )}
-    >
+    <>
+      <Card
+        variant="elevated"
+        interactive
+        role="article"
+        aria-labelledby={`${cardId}-title`}
+        aria-describedby={statusId}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          'relative overflow-hidden group',
+          // Enhanced responsive behavior with comprehensive optimization
+          'card-responsive',
+          // Comprehensive hover states with better visual hierarchy
+          'hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1',
+          'lg:hover:shadow-2xl lg:hover:scale-[1.03]',
+          // Optimized touch-friendly active states with better feedback
+          'active:scale-[0.98] active:translate-y-0 active:shadow-lg',
+          'active:transition-transform active:duration-150',
+          // Enhanced mobile-optimized touch interactions
+          'touch-manipulation select-none cursor-pointer',
+          // Comprehensive responsive sizing and spacing optimization
+          'h-full w-full flex flex-col',
+          // Enhanced accessibility for comprehensive keyboard navigation
+          'card-accessible keyboard-navigable focus-ring-card',
+          'focus-within:ring-2 focus-within:ring-primary/20 focus-within:ring-offset-2',
+          'focus-within:ring-offset-background focus-within:z-10',
+          // Enhanced focus management for keyboard users
+          'focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4',
+          'focus-visible:ring-offset-background focus-visible:outline-none',
+          // Comprehensive reduced motion support for accessibility
+          'motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0',
+          'motion-reduce:active:scale-100 motion-reduce:transition-none',
+          'motion-reduce:will-change-auto',
+          // Performance optimizations for smooth interactions
+          'transform-gpu will-change-transform backface-visibility-hidden',
+          'transition-all duration-300 ease-out',
+          // Enhanced contrast support
+          'text-contrast-aa',
+          className
+        )}
+      >
       {/* Status accent border with enhanced animation */}
       <StatusIndicator
         status={status}
@@ -178,37 +277,61 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
 
       <div className={cn(
         "relative flex flex-col h-full",
-        // Responsive padding with mobile optimization
-        "p-4 sm:p-5 lg:p-6",
-        // Enhanced spacing for better content hierarchy
-        "space-y-4 sm:space-y-5"
+        // Comprehensive responsive padding with optimal content density
+        "content-density-cozy",
+        // Enhanced spacing with comprehensive responsive optimization
+        "spacing-content-md",
+        // Better content organization and hierarchy
+        "justify-between"
       )}>
-        {/* Card Header - Instance info with proper hierarchy */}
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0 space-y-1 sm:space-y-2">
-            {/* Primary: Instance name with responsive typography */}
-            <h3 className={cn(
-              "font-semibold truncate transition-colors duration-200 group-hover:text-primary",
-              // Responsive typography scaling
-              "text-lg sm:text-xl lg:text-lg xl:text-xl",
-              // Enhanced line height for readability
-              "leading-tight"
-            )}>
+        {/* Enhanced card header with comprehensive responsive optimization */}
+        <div className={cn(
+          "flex items-start justify-between",
+          // Enhanced responsive spacing and alignment
+          "gap-3 sm:gap-4 lg:gap-3 xl:gap-4"
+        )}>
+          <div className={cn(
+            "flex-1 min-w-0",
+            // Optimized responsive spacing for content hierarchy
+            "spacing-content-sm"
+          )}>
+            {/* Enhanced instance name with comprehensive responsive typography */}
+            <h3 
+              id={`${cardId}-title`}
+              className={cn(
+                "font-semibold truncate transition-colors duration-200 group-hover:text-primary",
+                // Comprehensive responsive typography with optimal scaling
+                "text-responsive-subtitle",
+                // Enhanced line height optimization for different screen sizes
+                "leading-tight sm:leading-snug lg:leading-tight",
+                // Comprehensive focus styles for keyboard navigation
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                "focus-visible:ring-offset-1 focus-visible:rounded-sm keyboard-navigable"
+              )}
+              tabIndex={-1} // Allow programmatic focus for skip links
+            >
               {instanceName}
             </h3>
-            {/* Secondary: Phone number with responsive styling */}
-            <p className={cn(
-              "text-muted-foreground transition-colors duration-200",
-              // Responsive text sizing
-              "text-sm sm:text-base lg:text-sm",
-              // Better line height for mobile
-              "leading-relaxed"
-            )}>
+            
+            {/* Enhanced phone number with comprehensive responsive styling */}
+            <p 
+              className={cn(
+                "text-muted-foreground transition-colors duration-200",
+                // Optimized responsive text sizing with better readability
+                "text-responsive-caption",
+                // Enhanced line height for mobile readability
+                "leading-relaxed sm:leading-normal",
+                // Better truncation handling for long numbers
+                "truncate"
+              )}
+              aria-label={phoneNumber ? `Número: ${phoneNumber}` : 'Número não disponível'}
+              title={phoneNumber || 'Número não disponível'} // Tooltip for truncated content
+            >
               {phoneNumber || 'Número não disponível'}
             </p>
           </div>
 
-          {/* Actions menu with enhanced responsive behavior */}
+          {/* Enhanced actions menu with comprehensive responsive behavior and accessibility */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -216,76 +339,113 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
                 size="icon-sm"
                 className={cn(
                   "shrink-0 transition-all duration-200",
-                  // Responsive spacing and sizing
-                  "ml-2 sm:ml-3",
-                  "h-8 w-8 sm:h-9 sm:w-9",
-                  // Enhanced mobile touch targets
-                  "min-h-[44px] min-w-[44px] sm:min-h-[36px] sm:min-w-[36px]",
-                  // Improved visibility and interaction states
-                  "opacity-70 group-hover:opacity-100",
-                  "hover:bg-accent/80 hover:scale-110",
-                  "active:scale-95 active:bg-accent",
-                  // Better focus accessibility
-                  "focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-1"
+                  // Comprehensive responsive spacing and sizing optimization
+                  "ml-2 sm:ml-3 lg:ml-2 xl:ml-3",
+                  // Enhanced touch targets with WCAG AA compliance
+                  "touch-target-icon",
+                  "h-9 w-9 sm:h-10 sm:w-10 lg:h-9 lg:w-9 xl:h-10 xl:w-10",
+                  // Enhanced visibility and comprehensive interaction states
+                  "opacity-70 group-hover:opacity-100 lg:group-hover:opacity-90 xl:group-hover:opacity-100",
+                  "hover:bg-accent/80 hover:scale-110 lg:hover:scale-105 xl:hover:scale-110",
+                  "active:scale-95 active:bg-accent active:transition-transform active:duration-150",
+                  // Comprehensive accessibility enhancements
+                  "focus-ring-enhanced keyboard-navigable",
+                  // Better interaction area optimization
+                  "interaction-area-mobile sm:interaction-area-desktop",
+                  // Reduced motion support
+                  "motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
                 )}
-                aria-label={`Opções para ${instanceName}`}
+                aria-label={`Opções para instância ${instanceName}`}
+                aria-haspopup="menu"
+                aria-expanded={false}
               >
-                <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5" />
+                <MoreVertical className={cn(
+                  "transition-transform duration-200",
+                  // Responsive icon sizing
+                  "h-4 w-4 sm:h-5 sm:w-5 lg:h-4 lg:w-4 xl:h-5 xl:w-5"
+                )} aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent 
+              align="end" 
+              className="w-48"
+              role="menu"
+              aria-label={`Menu de opções para ${instanceName}`}
+            >
               <DropdownMenuItem 
                 onSelect={onShowQR}
-                className="cursor-pointer hover:bg-accent/80 transition-colors duration-150"
+                role="menuitem"
+                className="cursor-pointer hover:bg-accent/80 transition-colors duration-150 focus-ring-enhanced"
               >
-                <QrCode className="mr-2 h-4 w-4" />
+                <QrCode className="mr-2 h-4 w-4" aria-hidden="true" />
                 Ver QR Code
               </DropdownMenuItem>
               <DropdownMenuItem
                 className={cn(
                   "cursor-pointer transition-colors duration-150",
                   "text-destructive hover:text-destructive hover:bg-destructive/10",
-                  "focus:text-destructive focus:bg-destructive/10"
+                  "focus:text-destructive focus:bg-destructive/10",
+                  "focus-ring-destructive"
                 )}
                 onSelect={onDelete}
+                role="menuitem"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
+                <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
                 Excluir Instância
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {/* Status section with enhanced responsive feedback */}
+        {/* Status section with enhanced responsive feedback and accessibility */}
         <div className="flex-1 flex flex-col justify-center">
-          <StatusBadge 
-            status={status} 
-            size="md" 
-            variant="prominent"
-            showPulse={status === 'connecting' || status === 'initializing'}
-            className={cn(
-              "transition-all duration-200 group-hover:scale-105",
-              // Responsive sizing for better mobile visibility
-              "text-sm sm:text-base"
-            )}
-          />
+          <div id={statusId} role="status" aria-live="polite">
+            <StatusBadge 
+              status={status} 
+              size="md" 
+              variant="prominent"
+              showPulse={status === 'connecting' || status === 'initializing'}
+              className={cn(
+                "transition-all duration-200 group-hover:scale-105",
+                // Responsive sizing for better mobile visibility
+                "text-sm sm:text-base"
+              )}
+            />
+          </div>
         </div>
 
-        {/* Action buttons with responsive layout and clear hierarchy */}
-        <div className={cn(
-          "flex items-center gap-2 sm:gap-3",
-          // Responsive layout: stack on very small screens, side-by-side on larger
-          "flex-col xs:flex-row",
-          // Better spacing and alignment
-          "mt-auto pt-2"
-        )}>
-          {/* Secondary actions */}
-          <div className="flex items-center gap-2 w-full xs:w-auto">
+        {/* Enhanced action buttons with comprehensive responsive layout and accessibility */}
+        <div 
+          id={actionsId}
+          className={cn(
+            "flex items-center",
+            // Comprehensive responsive gap optimization
+            "gap-2 xs:gap-3 sm:gap-4 lg:gap-3 xl:gap-4",
+            // Enhanced responsive layout with better mobile stacking
+            "flex-col xs:flex-row",
+            // Optimized spacing and alignment with better content hierarchy
+            "mt-auto pt-3 sm:pt-4 lg:pt-3 xl:pt-4",
+            // Better visual separation
+            "border-t border-border/20 dark:border-border/10"
+          )}
+          role="group"
+          aria-label={`Ações para instância ${instanceName}`}
+        >
+          {/* Enhanced secondary actions with better responsive behavior */}
+          <div className={cn(
+            "flex items-center w-full xs:w-auto",
+            // Responsive gap for secondary actions
+            "gap-2 xs:gap-3 sm:gap-2"
+          )}>
             {renderSecondaryAction()}
           </div>
 
-          {/* Primary action with enhanced mobile optimization */}
-          <div className="flex items-center w-full xs:w-auto xs:ml-auto">
+          {/* Enhanced primary action with comprehensive mobile optimization */}
+          <div className={cn(
+            "flex items-center w-full xs:w-auto",
+            // Better responsive alignment
+            "xs:ml-auto xs:justify-end"
+          )}>
             {renderPrimaryAction()}
           </div>
         </div>
@@ -297,6 +457,10 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         )} />
       </div>
     </Card>
+    
+    {/* Live region for status announcements */}
+    <LiveRegionComponent />
+    </>
   );
 };
 

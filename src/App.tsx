@@ -12,6 +12,7 @@ import Login from './pages/Login';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { Toaster } from 'sonner';
 import { ApiSettingsProvider } from './contexts/ApiSettingsContext';
+import { DevAnimationPerformanceMonitor } from './components/ui/AnimationPerformanceMonitor';
 
 function App() {
   return (
@@ -19,6 +20,12 @@ function App() {
       <AuthProvider>
         <ApiSettingsProvider>
           <Toaster richColors position="top-right" />
+          <DevAnimationPerformanceMonitor 
+            showMetrics={true}
+            showReducedMotionStatus={true}
+            trackGlobalPerformance={true}
+            threshold={30}
+          />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route 

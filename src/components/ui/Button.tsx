@@ -19,15 +19,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants = {
-  default: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground hover:border-primary/50 hover:shadow-sm hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-none',
+  default: 'btn-contrast-primary shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
+  destructive: 'btn-contrast-destructive shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
+  outline: 'border border-input bg-background text-contrast-aa hover:bg-accent hover:text-accent-foreground hover:border-primary/50 hover:shadow-sm hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-none',
   secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-sm',
-  ghost: 'hover:bg-accent hover:text-accent-foreground hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100',
+  ghost: 'text-contrast-aa hover:bg-accent hover:text-accent-foreground hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100',
   link: 'text-primary underline-offset-4 hover:underline hover:text-primary/80 transition-all duration-200',
-  gradient: 'bg-gradient-to-r from-primary-500 to-primary-600 text-primary-foreground shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-primary-600 hover:to-primary-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
-  'gradient-destructive': 'bg-gradient-to-r from-destructive to-red-600 text-destructive-foreground shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-red-600 hover:to-red-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
-  'gradient-success': 'bg-gradient-to-r from-success to-green-600 text-success-foreground shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-green-600 hover:to-green-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
+  gradient: 'btn-contrast-primary bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-primary-600 hover:to-primary-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
+  'gradient-destructive': 'btn-contrast-destructive bg-gradient-to-r from-destructive to-red-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-red-600 hover:to-red-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
+  'gradient-success': 'btn-contrast-success bg-gradient-to-r from-success to-green-600 shadow-lg hover:shadow-xl hover:scale-[1.02] hover:from-green-600 hover:to-green-700 active:scale-[0.98] transition-all duration-200 disabled:hover:scale-100 disabled:hover:shadow-lg',
 };
 
 const sizes = {
