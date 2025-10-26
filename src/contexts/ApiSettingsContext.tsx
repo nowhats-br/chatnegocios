@@ -40,19 +40,7 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return url.endsWith('/') ? url.slice(0, -1) : url;
   })();
 
-  // URL real da Evolution API (não a do proxy)
-  const getRealEvolutionUrl = useCallback(async () => {
-    if (!user) {
-      return normalizeUrl(envApiUrl) || null;
-    }
-    
-    try {
-      const data = await dbClient.profiles.get(user.id);
-      return normalizeUrl(data.evolution_api_url || envApiUrl || null);
-    } catch {
-      return normalizeUrl(envApiUrl) || null;
-    }
-  }, [user, envApiUrl]);
+
 
   const normalizeUrl = (url: string | null) => {
     if (!url) return null;
