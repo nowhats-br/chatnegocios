@@ -25,6 +25,10 @@ const Settings: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error' | 'warning'>('idle');
   const [connectionMessage, setConnectionMessage] = useState<string>('');
 
+  // Verificar se está usando proxy
+  const useProxy = String(import.meta.env.VITE_EVOLUTION_USE_PROXY || 'true') === 'true';
+  const backendUrl = import.meta.env.VITE_BACKEND_URL as string;
+
   const { register, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
   });
@@ -50,21 +54,28 @@ const Settings: React.FC = () => {
   }, [watchedApiUrl, watchedApiKey]);
 
   const testConnection = async () => {
-    const currentApiUrl = watchedApiUrl;
-    const currentApiKey = watchedApiKey;
-
-    if (!currentApiUrl || !currentApiKey) {
-      toast.error('Preencha URL e Chave de API antes de testar');
-      return;
-    }
-
     setTestingConnection(true);
     setConnectionStatus('idle');
     setConnectionMessage('');
 
     try {
-      // Temporarily update settings for testing
-      await updateSettings(currentApiUrl, currentApiKey);
+      if (useProxy) {
+        // Quando usando proxy, testar diretamente sem precisar de configurações do usuário
+        setConnectionMessage('Testando conexão via proxy do backend...');
+      } else {
+        // Quando não usando proxy, precisa das configurações do usuário
+        const currentApiUrl = watchedApiUrl;
+        const currentApiKey = watchedApiKey;
+
+        if (!currentApiUrl || !currentApiKey) {
+          toast.error('Preencha URL e Chave de API antes de testar');
+          setTestingConnection(false);
+          return;
+        }
+
+        // Temporarily update settings for testing
+        await updateSettings(currentApiUrl, currentApiKey);
+      }
 
       // Test connection with a simple endpoint
       const testEndpoints = [
@@ -87,7 +98,11 @@ const Settings: React.FC = () => {
           if (response !== null) {
             testSuccess = true;
             setConnectionStatus('success');
-            setConnectionMessage('Conexão estabelecida com sucesso! API Evolution está respondendo.');
+            if (useProxy) {
+              setConnectionMessage('Conexão estabelecida com sucesso via proxy! Backend está comunicando com a Evolution API.');
+            } else {
+              setConnectionMessage('Conexão estabelecida com sucesso! API Evolution está respondendo diretamente.');
+            }
             toast.success('Conexão testada com sucesso!');
             break;
           }
@@ -99,7 +114,11 @@ const Settings: React.FC = () => {
 
       if (!testSuccess) {
         setConnectionStatus('error');
-        setConnectionMessage(`Falha na conexão: ${lastError}`);
+        if (useProxy) {
+          setConnectionMessage(`Falha na conexão via proxy: ${lastError}. Verifique se o backend está rodando em ${backendUrl} e se as configurações da Evolution API estão corretas no servidor.`);
+        } else {
+          setConnectionMessage(`Falha na conexão direta: ${lastError}`);
+        }
         toast.error('Falha no teste de conexão', { description: lastError });
       }
 
@@ -175,65 +194,121 @@ const Settings: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-6">
-              <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="apiUrl">URL da API Evolution</Label>
-                    <Input
-                      id="apiUrl"
-                      placeholder="https://sua-api-evolution.com.br"
-                      {...register('apiUrl')}
-                      className="mt-1"
-                    />
-                    {errors.apiUrl && (
-                      <p className="typography-body-sm text-error mt-1 flex items-center gap-1">
-                        <XCircle className="h-3 w-3" />
-                        {errors.apiUrl.message}
-                      </p>
-                    )}
-                    <p className="typography-body-sm text-muted-foreground mt-1">
-                      URL completa da sua instância da API Evolution (incluindo protocolo)
+              {useProxy ? (
+                // Modo Proxy - Configurações gerenciadas pelo backend
+                <div className="space-y-6">
+                  <div className="bg-info/10 border border-info/20 rounded-lg p-4">
+                    <h4 className="font-medium text-info mb-2">Modo Proxy Habilitado</h4>
+                    <p className="typography-body-sm text-info/80 mb-3">
+                      O sistema está configurado para usar o backend como proxy para a Evolution API. 
+                      As configurações da API são gerenciadas no servidor.
+                    </p>
+                    <div className="space-y-2 typography-body-sm text-info/70">
+                      <div>• <strong>Backend URL:</strong> {backendUrl}</div>
+                      <div>• <strong>Evolution API:</strong> Configurada no servidor</div>
+                      <div>• <strong>Benefícios:</strong> Sem problemas de CORS, credenciais seguras</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Button 
+                      type="button" 
+                      onClick={testConnection}
+                      disabled={testingConnection}
+                    >
+                      {testingConnection && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Testar Conexão via Proxy
+                    </Button>
+                    
+                    <Button 
+                      type="button" 
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(`${backendUrl}/api/evolution/manager/findInstances`);
+                          if (response.ok) {
+                            toast.success('Backend está respondendo!');
+                          } else {
+                            toast.error(`Backend retornou status ${response.status}`);
+                          }
+                        } catch (error: any) {
+                          toast.error('Erro ao conectar com backend', { description: error.message });
+                        }
+                      }}
+                    >
+                      Testar Backend
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                // Modo Direto - Usuário configura URL e Key
+                <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
+                  <div className="bg-warning/10 border border-warning/20 rounded-lg p-4 mb-4">
+                    <h4 className="font-medium text-warning mb-2">Modo Direto Habilitado</h4>
+                    <p className="typography-body-sm text-warning/80">
+                      O sistema fará chamadas diretas para a Evolution API. Configure as credenciais abaixo.
                     </p>
                   </div>
 
-                  <div>
-                    <Label htmlFor="apiKey">Chave de API (Global API Key)</Label>
-                    <Input
-                      id="apiKey"
-                      type="password"
-                      placeholder="Sua chave de API global"
-                      {...register('apiKey')}
-                      className="mt-1"
-                    />
-                    {errors.apiKey && (
-                      <p className="typography-body-sm text-error mt-1 flex items-center gap-1">
-                        <XCircle className="h-3 w-3" />
-                        {errors.apiKey.message}
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="apiUrl">URL da API Evolution</Label>
+                      <Input
+                        id="apiUrl"
+                        placeholder="https://sua-api-evolution.com.br"
+                        {...register('apiUrl')}
+                        className="mt-1"
+                      />
+                      {errors.apiUrl && (
+                        <p className="typography-body-sm text-error mt-1 flex items-center gap-1">
+                          <XCircle className="h-3 w-3" />
+                          {errors.apiUrl.message}
+                        </p>
+                      )}
+                      <p className="typography-body-sm text-muted-foreground mt-1">
+                        URL completa da sua instância da API Evolution (incluindo protocolo)
                       </p>
-                    )}
-                    <p className="typography-body-sm text-muted-foreground mt-1">
-                      Chave de API global configurada na sua instância Evolution
-                    </p>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="apiKey">Chave de API (Global API Key)</Label>
+                      <Input
+                        id="apiKey"
+                        type="password"
+                        placeholder="Sua chave de API global"
+                        {...register('apiKey')}
+                        className="mt-1"
+                      />
+                      {errors.apiKey && (
+                        <p className="typography-body-sm text-error mt-1 flex items-center gap-1">
+                          <XCircle className="h-3 w-3" />
+                          {errors.apiKey.message}
+                        </p>
+                      )}
+                      <p className="typography-body-sm text-muted-foreground mt-1">
+                        Chave de API global configurada na sua instância Evolution
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3 pt-2">
-                  <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Salvar Configurações
-                  </Button>
+                  <div className="flex items-center gap-3 pt-2">
+                    <Button type="submit" disabled={isSubmitting}>
+                      {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Salvar Configurações
+                    </Button>
 
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    onClick={testConnection}
-                    disabled={testingConnection || !watchedApiUrl || !watchedApiKey}
-                  >
-                    {testingConnection && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Testar Conexão
-                  </Button>
-                </div>
-              </form>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={testConnection}
+                      disabled={testingConnection || !watchedApiUrl || !watchedApiKey}
+                    >
+                      {testingConnection && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Testar Conexão
+                    </Button>
+                  </div>
+                </form>
+              )}
 
               {/* Connection Status */}
               {(connectionStatus !== 'idle' || connectionMessage) && (
@@ -261,21 +336,23 @@ const Settings: React.FC = () => {
                 <h4 className="font-medium mb-3">Status Atual</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
+                    <span className="text-muted-foreground">Modo:</span>
+                    <span className="ml-2 font-medium">
+                      {useProxy ? 'Proxy (Backend)' : 'Direto'}
+                    </span>
+                  </div>
+                  <div>
                     <span className="text-muted-foreground">Configuração:</span>
                     <span className={`ml-2 font-medium ${isConfigured ? 'text-success' : 'text-error'}`}>
                       {isConfigured ? 'Completa' : 'Incompleta'}
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">URL da API:</span>
-                    <span className="ml-2 font-medium">
-                      {apiUrl ? 'Configurada' : 'Não configurada'}
+                    <span className="text-muted-foreground">
+                      {useProxy ? 'Backend URL:' : 'URL da API:'}
                     </span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Chave de API:</span>
                     <span className="ml-2 font-medium">
-                      {apiKey ? 'Configurada' : 'Não configurada'}
+                      {apiUrl ? (useProxy ? 'Configurada' : 'Configurada') : 'Não configurada'}
                     </span>
                   </div>
                   <div>
@@ -293,13 +370,25 @@ const Settings: React.FC = () => {
 
               {/* Help Section */}
               <div className="bg-info/10 border border-info/20 rounded-lg p-4">
-                <h4 className="font-medium text-info mb-2">Como configurar</h4>
-                <ul className="typography-body-sm text-info/80 space-y-1">
-                  <li>• Certifique-se de que sua API Evolution está rodando e acessível</li>
-                  <li>• Use a URL completa incluindo protocolo (http:// ou https://)</li>
-                  <li>• A chave de API deve ser a Global API Key configurada na Evolution</li>
-                  <li>• Teste a conexão após salvar para verificar se está funcionando</li>
-                </ul>
+                <h4 className="font-medium text-info mb-2">
+                  {useProxy ? 'Modo Proxy - Informações' : 'Como configurar'}
+                </h4>
+                {useProxy ? (
+                  <ul className="typography-body-sm text-info/80 space-y-1">
+                    <li>• O backend faz proxy para a Evolution API automaticamente</li>
+                    <li>• As credenciais da Evolution são configuradas no servidor</li>
+                    <li>• Não há problemas de CORS ou exposição de credenciais</li>
+                    <li>• Clique em "Testar Conexão" para verificar se o backend está funcionando</li>
+                    <li>• Se houver falha, verifique se o backend está rodando em {backendUrl}</li>
+                  </ul>
+                ) : (
+                  <ul className="typography-body-sm text-info/80 space-y-1">
+                    <li>• Certifique-se de que sua API Evolution está rodando e acessível</li>
+                    <li>• Use a URL completa incluindo protocolo (http:// ou https://)</li>
+                    <li>• A chave de API deve ser a Global API Key configurada na Evolution</li>
+                    <li>• Teste a conexão após salvar para verificar se está funcionando</li>
+                  </ul>
+                )}
               </div>
             </div>
           )}
