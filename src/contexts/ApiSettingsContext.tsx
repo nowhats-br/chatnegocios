@@ -9,6 +9,10 @@ interface ApiSettingsContextType {
   isConfigured: boolean;
   loading: boolean;
   updateSettings: (apiUrl: string, apiKey: string) => Promise<void>;
+  // Informações sobre proxy
+  useProxy: boolean;
+  realEvolutionUrl: string | null;
+  backendUrl: string | null;
 }
 
 const ApiSettingsContext = createContext<ApiSettingsContextType>({
@@ -17,6 +21,9 @@ const ApiSettingsContext = createContext<ApiSettingsContextType>({
   isConfigured: false,
   loading: true,
   updateSettings: async () => {},
+  useProxy: true,
+  realEvolutionUrl: null,
+  backendUrl: null,
 });
 
 export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -33,6 +40,20 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return url.endsWith('/') ? url.slice(0, -1) : url;
   })();
 
+  // URL real da Evolution API (não a do proxy)
+  const getRealEvolutionUrl = useCallback(async () => {
+    if (!user) {
+      return normalizeUrl(envApiUrl) || null;
+    }
+    
+    try {
+      const data = await dbClient.profiles.get(user.id);
+      return normalizeUrl(data.evolution_api_url || envApiUrl || null);
+    } catch {
+      return normalizeUrl(envApiUrl) || null;
+    }
+  }, [user, envApiUrl]);
+
   const normalizeUrl = (url: string | null) => {
     if (!url) return null;
     return url.endsWith('/') ? url.slice(0, -1) : url;
@@ -41,10 +62,17 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const fetchSettings = useCallback(async () => {
     if (!user) {
       setLoading(false);
-      const proxyBase = `${backendBase}/api/evolution`;
-      const directUrl = normalizeUrl(envApiUrl) || null;
-      setApiUrl(envUseProxy ? proxyBase : directUrl);
-      setApiKey(envUseProxy ? null : (envApiKey || null));
+      if (envUseProxy) {
+        // Quando usando proxy, usar URL do proxy para requisições, mas mostrar URL real da Evolution
+        const proxyBase = `${backendBase}/api/evolution`;
+        setApiUrl(proxyBase);
+        setApiKey(null); // Proxy não precisa de key no frontend
+      } else {
+        // Quando não usando proxy, usar URL direta
+        const directUrl = normalizeUrl(envApiUrl) || null;
+        setApiUrl(directUrl);
+        setApiKey(envApiKey || null);
+      }
       return;
     }
     
@@ -53,20 +81,30 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.ensureExists();
       const data = await dbClient.profiles.get(user.id);
       
-      const directUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
-      const proxyBase = `${backendBase}/api/evolution`;
-      const effectiveUrl = envUseProxy ? proxyBase : directUrl;
-      const effectiveKey = envUseProxy ? null : (data.evolution_api_key || envApiKey || null);
-
-      setApiUrl(effectiveUrl);
-      setApiKey(effectiveKey);
+      if (envUseProxy) {
+        // Quando usando proxy, sempre usar URL do proxy para requisições
+        const proxyBase = `${backendBase}/api/evolution`;
+        setApiUrl(proxyBase);
+        setApiKey(null); // Proxy gerencia a key no backend
+      } else {
+        // Quando não usando proxy, usar configurações do usuário ou env
+        const directUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
+        const directKey = data.evolution_api_key || envApiKey || null;
+        setApiUrl(directUrl);
+        setApiKey(directKey);
+      }
 
     } catch (error: any) {
       toast.error("Erro ao carregar configurações da API", { description: error.message });
-      const proxyBase = `${backendBase}/api/evolution`;
-      const directUrl = normalizeUrl(envApiUrl) || null;
-      setApiUrl(envUseProxy ? proxyBase : directUrl);
-      setApiKey(envUseProxy ? null : (envApiKey || null));
+      if (envUseProxy) {
+        const proxyBase = `${backendBase}/api/evolution`;
+        setApiUrl(proxyBase);
+        setApiKey(null);
+      } else {
+        const directUrl = normalizeUrl(envApiUrl) || null;
+        setApiUrl(directUrl);
+        setApiKey(envApiKey || null);
+      }
     } finally {
       setLoading(false);
     }
@@ -96,7 +134,16 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const isConfigured = !!apiUrl && (envUseProxy || !!apiKey);
 
   return (
-    <ApiSettingsContext.Provider value={{ apiUrl, apiKey, isConfigured, loading, updateSettings }}>
+    <ApiSettingsContext.Provider value={{ 
+      apiUrl, 
+      apiKey, 
+      isConfigured, 
+      loading, 
+      updateSettings,
+      useProxy: envUseProxy,
+      realEvolutionUrl: envApiUrl,
+      backendUrl: backendBase
+    }}>
       {children}
     </ApiSettingsContext.Provider>
   );

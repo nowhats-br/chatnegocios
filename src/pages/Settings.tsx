@@ -19,15 +19,13 @@ const settingsSchema = z.object({
 type SettingsFormData = z.infer<typeof settingsSchema>;
 
 const Settings: React.FC = () => {
-  const { apiUrl, apiKey, loading, updateSettings, isConfigured } = useApiSettings();
+  const { apiUrl, apiKey, loading, updateSettings, isConfigured, useProxy, realEvolutionUrl, backendUrl } = useApiSettings();
   const { request: evolutionApiRequest } = useEvolutionApi();
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error' | 'warning'>('idle');
   const [connectionMessage, setConnectionMessage] = useState<string>('');
-
-  // Verificar se está usando proxy
-  const useProxy = String(import.meta.env.VITE_EVOLUTION_USE_PROXY || 'true') === 'true';
-  const backendUrl = import.meta.env.VITE_BACKEND_URL as string;
+  const [realApiUrl, setRealApiUrl] = useState<string>('');
+  const [realApiKey, setRealApiKey] = useState<string>('');
 
   const { register, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -38,12 +36,19 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     if (!loading) {
-      reset({
-        apiUrl: apiUrl || '',
-        apiKey: apiKey || '',
-      });
+      if (useProxy) {
+        // No modo proxy, mostrar a URL real da Evolution para configuração
+        setRealApiUrl(realEvolutionUrl || 'https://evolution.nowhats.com.br');
+        setRealApiKey(''); // Key é gerenciada no backend
+      } else {
+        // No modo direto, usar as configurações normais
+        reset({
+          apiUrl: apiUrl || '',
+          apiKey: apiKey || '',
+        });
+      }
     }
-  }, [apiUrl, apiKey, loading, reset]);
+  }, [apiUrl, apiKey, loading, reset, useProxy, realEvolutionUrl]);
 
   // Reset connection status when form values change
   useEffect(() => {
@@ -195,24 +200,75 @@ const Settings: React.FC = () => {
           ) : (
             <div className="space-y-6">
               {useProxy ? (
-                // Modo Proxy - Configurações gerenciadas pelo backend
+                // Modo Proxy - Mostrar configurações da Evolution API real
                 <div className="space-y-6">
                   <div className="bg-info/10 border border-info/20 rounded-lg p-4">
                     <h4 className="font-medium text-info mb-2">Modo Proxy Habilitado</h4>
                     <p className="typography-body-sm text-info/80 mb-3">
-                      O sistema está configurado para usar o backend como proxy para a Evolution API. 
-                      As configurações da API são gerenciadas no servidor.
+                      O sistema usa o backend como proxy para a Evolution API. Configure a URL real da Evolution API abaixo.
                     </p>
                     <div className="space-y-2 typography-body-sm text-info/70">
                       <div>• <strong>Backend URL:</strong> {backendUrl}</div>
-                      <div>• <strong>Evolution API:</strong> Configurada no servidor</div>
+                      <div>• <strong>Proxy Path:</strong> {backendUrl}/api/evolution</div>
                       <div>• <strong>Benefícios:</strong> Sem problemas de CORS, credenciais seguras</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="realApiUrl">URL Real da Evolution API</Label>
+                      <Input
+                        id="realApiUrl"
+                        placeholder="https://evolution.nowhats.com.br"
+                        value={realApiUrl}
+                        onChange={(e) => setRealApiUrl(e.target.value)}
+                        className="mt-1"
+                      />
+                      <p className="typography-body-sm text-muted-foreground mt-1">
+                        URL real da Evolution API que o backend deve acessar
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="realApiKey">Chave de API (Global API Key)</Label>
+                      <Input
+                        id="realApiKey"
+                        type="password"
+                        placeholder="Configurada no servidor"
+                        value={realApiKey}
+                        onChange={(e) => setRealApiKey(e.target.value)}
+                        className="mt-1"
+                        disabled
+                      />
+                      <p className="typography-body-sm text-muted-foreground mt-1">
+                        A chave de API é gerenciada no servidor backend por segurança
+                      </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <Button 
+                      type="button"
+                      onClick={async () => {
+                        if (!realApiUrl) {
+                          toast.error('Preencha a URL da Evolution API');
+                          return;
+                        }
+                        try {
+                          await updateSettings(realApiUrl, ''); // Key vazia no modo proxy
+                          toast.success('URL da Evolution API salva com sucesso!');
+                        } catch (error: any) {
+                          toast.error('Erro ao salvar configurações', { description: error.message });
+                        }
+                      }}
+                      disabled={!realApiUrl}
+                    >
+                      Salvar URL da Evolution
+                    </Button>
+                    
+                    <Button 
                       type="button" 
+                      variant="outline"
                       onClick={testConnection}
                       disabled={testingConnection}
                     >
@@ -349,12 +405,18 @@ const Settings: React.FC = () => {
                   </div>
                   <div>
                     <span className="text-muted-foreground">
-                      {useProxy ? 'Backend URL:' : 'URL da API:'}
+                      {useProxy ? 'Evolution API URL:' : 'URL da API:'}
                     </span>
                     <span className="ml-2 font-medium">
-                      {apiUrl ? (useProxy ? 'Configurada' : 'Configurada') : 'Não configurada'}
+                      {useProxy ? (realEvolutionUrl || 'Não configurada') : (apiUrl || 'Não configurada')}
                     </span>
                   </div>
+                  {useProxy && (
+                    <div>
+                      <span className="text-muted-foreground">Proxy URL:</span>
+                      <span className="ml-2 font-medium">{apiUrl || 'Não configurada'}</span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-muted-foreground">Última Conexão:</span>
                     <span className={`ml-2 font-medium ${
@@ -375,11 +437,11 @@ const Settings: React.FC = () => {
                 </h4>
                 {useProxy ? (
                   <ul className="typography-body-sm text-info/80 space-y-1">
-                    <li>• O backend faz proxy para a Evolution API automaticamente</li>
-                    <li>• As credenciais da Evolution são configuradas no servidor</li>
-                    <li>• Não há problemas de CORS ou exposição de credenciais</li>
-                    <li>• Clique em "Testar Conexão" para verificar se o backend está funcionando</li>
-                    <li>• Se houver falha, verifique se o backend está rodando em {backendUrl}</li>
+                    <li>• Configure a <strong>URL real da Evolution API</strong> (ex: https://evolution.nowhats.com.br)</li>
+                    <li>• A chave de API é gerenciada no servidor backend por segurança</li>
+                    <li>• O backend faz proxy para evitar problemas de CORS</li>
+                    <li>• Use "Testar Backend" se houver problemas de conectividade</li>
+                    <li>• A URL deve ser acessível pelo servidor backend</li>
                   </ul>
                 ) : (
                   <ul className="typography-body-sm text-info/80 space-y-1">
