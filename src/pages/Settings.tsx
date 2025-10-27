@@ -281,14 +281,33 @@ const Settings: React.FC = () => {
                       variant="outline"
                       onClick={async () => {
                         try {
-                          const response = await fetch(`${backendUrl}/api/evolution/manager/findInstances`);
-                          if (response.ok) {
-                            toast.success('Backend está respondendo!');
+                          // Primeiro testa se o backend está rodando
+                          const healthResponse = await fetch(`${backendUrl}/api/health`);
+                          if (!healthResponse.ok) {
+                            toast.error(`Backend não está respondendo (status ${healthResponse.status})`);
+                            return;
+                          }
+                          
+                          const healthData = await healthResponse.json();
+                          console.log('Health data:', healthData);
+                          
+                          // Depois testa a conexão com Evolution API
+                          const testResponse = await fetch(`${backendUrl}/api/test-evolution`);
+                          const testData = await testResponse.json();
+                          
+                          if (testData.success) {
+                            toast.success('Backend e Evolution API funcionando!', { 
+                              description: testData.message 
+                            });
                           } else {
-                            toast.error(`Backend retornou status ${response.status}`);
+                            toast.error('Problema na Evolution API', { 
+                              description: testData.error 
+                            });
                           }
                         } catch (error: any) {
-                          toast.error('Erro ao conectar com backend', { description: error.message });
+                          toast.error('Erro ao conectar com backend', { 
+                            description: error.message 
+                          });
                         }
                       }}
                     >
