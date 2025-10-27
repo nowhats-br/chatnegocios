@@ -1,0 +1,3 @@
+dockerfile=Dockerfile
+build_context=.
+port=3001

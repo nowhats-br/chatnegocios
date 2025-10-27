@@ -34,7 +34,6 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const envApiUrl = (import.meta.env.VITE_EVOLUTION_API_URL as string) || null;
   const envApiKey = (import.meta.env.VITE_EVOLUTION_API_KEY as string) || null;
-  const envUseProxy = String(import.meta.env.VITE_EVOLUTION_USE_PROXY || 'true') === 'true';
   const backendBase = (() => {
     const url = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
     return url.endsWith('/') ? url.slice(0, -1) : url;
