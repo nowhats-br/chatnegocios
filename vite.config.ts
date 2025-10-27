@@ -11,6 +11,10 @@ export default defineConfig({
     },
   },
   build: {
+    target: 'es2020',
+    minify: 'esbuild',
+    sourcemap: false,
+    cssCodeSplit: false,
     rollupOptions: {
       external: (id) => {
         // Excluir arquivos de teste e stories problemáticos do build
@@ -18,8 +22,12 @@ export default defineConfig({
                id.includes('.stories.') ||
                id.includes('__tests__') ||
                id.includes('/test/');
+      },
+      output: {
+        manualChunks: undefined,
       }
-    }
+    },
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     host: true,
