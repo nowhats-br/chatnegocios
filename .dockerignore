@@ -1,93 +1,36 @@
-# DOCKERIGNORE ULTRA-OTIMIZADO - Reduz contexto de build em 90%
+# DOCKERIGNORE SEGURO - Para evitar erros de build
 
 # Node modules (será reinstalado)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-.npm/
-.yarn/
 
-# Git e controle de versão
+# Git
 .git/
 .gitignore
-.gitattributes
-.github/
 
-# IDEs e editores
+# IDEs
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# Kiro e ferramentas de desenvolvimento
-.kiro/
-.storybook/
-scripts/
-deploy/
-
-# Arquivos de teste (TODOS)
-**/*.test.*
-**/*.spec.*
-src/test/
-coverage/
-.nyc_output/
-jest.config.*
-vitest.config.*
-
-# Documentação e README
-*.md
-docs/
-CHANGELOG*
-LICENSE*
-
-# Configurações de desenvolvimento
-.env.local
-.env.development
-.env.test
-.env.example
-
-# Logs e cache
-logs/
+# Logs
 *.log
+logs/
+
+# Cache
 .cache/
-.parcel-cache/
-.next/
-.nuxt/
-dist-ssr/
 *.tsbuildinfo
-.eslintcache
 
-# Build artifacts que serão recriados
-dist/
-
-# Arquivos de sistema
+# Arquivos temporários
+*.tmp
 .DS_Store
 Thumbs.db
-*.tmp
-*.temp
-tmp/
-temp/
 
-# Configurações que não são necessárias no container
-tsconfig*.json
-vite.config.*
-vitest.config.*
-eslint.config.*
-tailwind.config.*
-postcss.config.*
+# Documentação (apenas alguns)
+README.md
+*.md
 
-# Arquivos de backup
-*.bak
-*.backup
-*~
-
-# Arquivos específicos do projeto que não são necessários
-BACKEND_FIXES.md
-BUG_FIXES_SUMMARY.md
-BUILD_FIXES.md
-CLEANUP_SUMMARY.md
-DEPLOY_OPTIMIZATION.md
-EVOLUTION_API_INTEGRATION.md
-RESPONSIVE_IMPROVEMENTS.md
+# Testes
+**/*.test.*
+**/*.spec.*
+coverage/

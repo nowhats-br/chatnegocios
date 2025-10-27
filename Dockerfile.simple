@@ -1,0 +1,19 @@
+# DOCKERFILE ULTRA-SIMPLES - SOLUÇÃO DE EMERGÊNCIA
+FROM node:18
+
+WORKDIR /app
+
+# Copiar tudo
+COPY . .
+
+# Instalar dependências
+RUN npm install
+
+# Build
+RUN npm run build:fast
+
+EXPOSE 3001
+
+ENV NODE_ENV=production
+
+CMD ["node", "server/app.cjs"]

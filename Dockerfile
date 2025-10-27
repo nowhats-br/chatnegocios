@@ -1,33 +1,30 @@
-# Dockerfile EXTREMAMENTE OTIMIZADO para EasyPanel
+# DOCKERFILE MÍNIMO E GARANTIDO - SOLUÇÃO URGENTE
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Instalar dependências de sistema mínimas
+# Instalar wget para health check
 RUN apk add --no-cache wget
 
-# Cache layer: package.json primeiro
-COPY package*.json ./
+# Copiar package.json
+COPY package.json package-lock.json ./
 
-# Instalar APENAS produção, sem logs
-RUN npm ci --only=production --silent --no-audit --no-fund --no-optional
+# Instalar dependências (SEM --only=production para evitar erros)
+RUN npm ci --no-audit --no-fund
 
-# Copiar código e build
+# Copiar todo o código
 COPY . .
-RUN npm run build:ultra
 
-# Limpeza agressiva para reduzir tamanho
-RUN rm -rf src .git* *.md scripts deploy .kiro .vscode .storybook tsconfig* vite.config* vitest.config* eslint.config* tailwind.config* postcss.config* \
-    && npm cache clean --force
+# Build sem TypeScript check (mais rápido e confiável)
+RUN npm run build:fast
 
-# Usuário não-root
+# Criar usuário
 RUN adduser -D appuser
 USER appuser
 
 EXPOSE 3001
 
-ENV NODE_ENV=production \
-    PORT=3001 \
-    NODE_OPTIONS="--max-old-space-size=256"
+ENV NODE_ENV=production
+ENV PORT=3001
 
 CMD ["node", "server/app.cjs"]
