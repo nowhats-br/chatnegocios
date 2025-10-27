@@ -1,19 +1,33 @@
-# DOCKERFILE ULTRA-SIMPLES - SOLUÇÃO DE EMERGÊNCIA
-FROM node:18
+# DOCKERFILE SIMPLES - SEM PROXY - SOLUÇÃO DEFINITIVA
+FROM node:18-alpine
 
 WORKDIR /app
 
-# Copiar tudo
-COPY . .
+# Instalar dependências mínimas
+RUN apk add --no-cache wget
+
+# Copiar package.json
+COPY package*.json ./
 
 # Instalar dependências
-RUN npm install
+RUN npm ci --no-audit --no-fund
 
-# Build
+# Copiar código
+COPY . .
+
+# Build do frontend
 RUN npm run build:fast
+
+# Copiar servidor simples
+COPY server/app.simple.cjs ./server/
+
+# Usuário não-root
+RUN adduser -D appuser
+USER appuser
 
 EXPOSE 3001
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    PORT=3001
 
-CMD ["node", "server/app.cjs"]
+CMD ["node", "server/app.simple.cjs"]

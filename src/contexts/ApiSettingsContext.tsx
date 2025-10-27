@@ -50,17 +50,10 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const fetchSettings = useCallback(async () => {
     if (!user) {
       setLoading(false);
-      if (envUseProxy) {
-        // Quando usando proxy, usar URL do proxy para requisições, mas mostrar URL real da Evolution
-        const proxyBase = `${backendBase}/api/evolution`;
-        setApiUrl(proxyBase);
-        setApiKey(null); // Proxy não precisa de key no frontend
-      } else {
-        // Quando não usando proxy, usar URL direta
-        const directUrl = normalizeUrl(envApiUrl) || null;
-        setApiUrl(directUrl);
-        setApiKey(envApiKey || null);
-      }
+      // Sem usuário logado, usar configurações do .env
+      const directUrl = normalizeUrl(envApiUrl) || null;
+      setApiUrl(directUrl);
+      setApiKey(envApiKey || null);
       return;
     }
     
@@ -69,34 +62,22 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await dbClient.profiles.ensureExists();
       const data = await dbClient.profiles.get(user.id);
       
-      if (envUseProxy) {
-        // Quando usando proxy, sempre usar URL do proxy para requisições
-        const proxyBase = `${backendBase}/api/evolution`;
-        setApiUrl(proxyBase);
-        setApiKey(null); // Proxy gerencia a key no backend
-      } else {
-        // Quando não usando proxy, usar configurações do usuário ou env
-        const directUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
-        const directKey = data.evolution_api_key || envApiKey || null;
-        setApiUrl(directUrl);
-        setApiKey(directKey);
-      }
+      // SEMPRE usar configurações do usuário ou fallback para .env
+      const directUrl = normalizeUrl(data.evolution_api_url || envApiUrl || null);
+      const directKey = data.evolution_api_key || envApiKey || null;
+      setApiUrl(directUrl);
+      setApiKey(directKey);
 
     } catch (error: any) {
       toast.error("Erro ao carregar configurações da API", { description: error.message });
-      if (envUseProxy) {
-        const proxyBase = `${backendBase}/api/evolution`;
-        setApiUrl(proxyBase);
-        setApiKey(null);
-      } else {
-        const directUrl = normalizeUrl(envApiUrl) || null;
-        setApiUrl(directUrl);
-        setApiKey(envApiKey || null);
-      }
+      // Fallback para .env em caso de erro
+      const directUrl = normalizeUrl(envApiUrl) || null;
+      setApiUrl(directUrl);
+      setApiKey(envApiKey || null);
     } finally {
       setLoading(false);
     }
-  }, [user, envApiUrl, envApiKey, envUseProxy, backendBase]);
+  }, [user, envApiUrl, envApiKey, backendBase]);
 
 
   useEffect(() => {
@@ -119,7 +100,7 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  const isConfigured = !!apiUrl && (envUseProxy || !!apiKey);
+  const isConfigured = !!apiUrl && !!apiKey;
 
   return (
     <ApiSettingsContext.Provider value={{ 
@@ -128,7 +109,7 @@ export const ApiSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       isConfigured, 
       loading, 
       updateSettings,
-      useProxy: envUseProxy,
+      useProxy: false, // Sempre false - sem proxy
       realEvolutionUrl: envApiUrl,
       backendUrl: backendBase
     }}>

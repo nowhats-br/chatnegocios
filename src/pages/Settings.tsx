@@ -36,19 +36,13 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     if (!loading) {
-      if (useProxy) {
-        // No modo proxy, mostrar a URL real da Evolution para configuração
-        setRealApiUrl(realEvolutionUrl || 'https://evolution.nowhats.com.br');
-        setRealApiKey(''); // Key é gerenciada no backend
-      } else {
-        // No modo direto, usar as configurações normais
-        reset({
-          apiUrl: apiUrl || '',
-          apiKey: apiKey || '',
-        });
-      }
+      // SEMPRE permitir configuração manual (sem proxy)
+      reset({
+        apiUrl: apiUrl || 'https://evolution.nowhats.com.br',
+        apiKey: apiKey || '',
+      });
     }
-  }, [apiUrl, apiKey, loading, reset, useProxy, realEvolutionUrl]);
+  }, [apiUrl, apiKey, loading, reset]);
 
   // Reset connection status when form values change
   useEffect(() => {
@@ -64,23 +58,20 @@ const Settings: React.FC = () => {
     setConnectionMessage('');
 
     try {
-      if (useProxy) {
-        // Quando usando proxy, testar diretamente sem precisar de configurações do usuário
-        setConnectionMessage('Testando conexão via proxy do backend...');
-      } else {
-        // Quando não usando proxy, precisa das configurações do usuário
-        const currentApiUrl = watchedApiUrl;
-        const currentApiKey = watchedApiKey;
+      // SEMPRE usar configurações manuais (sem proxy)
+      const currentApiUrl = watchedApiUrl;
+      const currentApiKey = watchedApiKey;
 
-        if (!currentApiUrl || !currentApiKey) {
-          toast.error('Preencha URL e Chave de API antes de testar');
-          setTestingConnection(false);
-          return;
-        }
-
-        // Temporarily update settings for testing
-        await updateSettings(currentApiUrl, currentApiKey);
+      if (!currentApiUrl || !currentApiKey) {
+        toast.error('Preencha URL e Chave de API antes de testar');
+        setTestingConnection(false);
+        return;
       }
+
+      setConnectionMessage('Testando conexão direta com Evolution API...');
+      
+      // Atualizar configurações temporariamente para teste
+      await updateSettings(currentApiUrl, currentApiKey);
 
       // Test connection with a simple endpoint
       const testEndpoints = [
@@ -103,11 +94,7 @@ const Settings: React.FC = () => {
           if (response !== null) {
             testSuccess = true;
             setConnectionStatus('success');
-            if (useProxy) {
-              setConnectionMessage('Conexão estabelecida com sucesso via proxy! Backend está comunicando com a Evolution API.');
-            } else {
-              setConnectionMessage('Conexão estabelecida com sucesso! API Evolution está respondendo diretamente.');
-            }
+            setConnectionMessage('✅ Conexão estabelecida com sucesso! Evolution API está respondendo diretamente.');
             toast.success('Conexão testada com sucesso!');
             break;
           }
@@ -119,11 +106,7 @@ const Settings: React.FC = () => {
 
       if (!testSuccess) {
         setConnectionStatus('error');
-        if (useProxy) {
-          setConnectionMessage(`Falha na conexão via proxy: ${lastError}. Verifique se o backend está rodando em ${backendUrl} e se as configurações da Evolution API estão corretas no servidor.`);
-        } else {
-          setConnectionMessage(`Falha na conexão direta: ${lastError}`);
-        }
+        setConnectionMessage(`❌ Falha na conexão: ${lastError}. Verifique se a URL e API Key estão corretas.`);
         toast.error('Falha no teste de conexão', { description: lastError });
       }
 
