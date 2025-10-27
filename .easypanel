@@ -1,4 +1,0 @@
-dockerfile=Dockerfile
-build_context=.
-port=3001
-disable_nixpacks=true

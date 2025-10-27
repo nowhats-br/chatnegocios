@@ -1,6 +1,0 @@
-# Forçar uso do Dockerfile - desabilitar Nixpacks completamente
-[build]
-dockerfile = "Dockerfile"
-
-[variables]
-NIXPACKS_NO_DEFAULT_CACHE_DIRECTORIES = "1"

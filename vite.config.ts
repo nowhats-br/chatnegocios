@@ -14,20 +14,26 @@ export default defineConfig({
     target: 'es2020',
     minify: 'esbuild',
     sourcemap: false,
-    cssCodeSplit: false,
+    cssCodeSplit: true,
     rollupOptions: {
       external: (id) => {
-        // Excluir arquivos de teste e stories problemáticos do build
-        return id.includes('.test.') || 
-               id.includes('.stories.') ||
-               id.includes('__tests__') ||
-               id.includes('/test/');
+        return id.includes('.test.') ||
+          id.includes('.stories.') ||
+          id.includes('__tests__') ||
+          id.includes('/test/');
       },
       output: {
-        manualChunks: undefined,
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'ui-vendor': ['@radix-ui/react-dropdown-menu', '@radix-ui/react-slot'],
+          'form-vendor': ['react-hook-form', '@hookform/resolvers', 'zod'],
+          'motion-vendor': ['framer-motion'],
+          'supabase-vendor': ['@supabase/supabase-js'],
+          'router-vendor': ['react-router-dom']
+        }
       }
     },
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 500,
   },
   server: {
     host: true,
