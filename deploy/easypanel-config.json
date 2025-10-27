@@ -1,0 +1,66 @@
+{
+  "name": "chatnegocios",
+  "description": "Sistema de Vendas WhatsApp - Otimizado para EasyPanel",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "args": {
+      "NODE_ENV": "production"
+    },
+    "cache": {
+      "enabled": true,
+      "from": ["chatnegocios:cache"]
+    }
+  },
+  "deploy": {
+    "replicas": 1,
+    "strategy": "RollingUpdate",
+    "resources": {
+      "limits": {
+        "memory": "512Mi",
+        "cpu": "500m"
+      },
+      "requests": {
+        "memory": "256Mi",
+        "cpu": "250m"
+      }
+    },
+    "ports": [
+      {
+        "name": "http",
+        "containerPort": 3001,
+        "protocol": "TCP"
+      }
+    ],
+    "env": [
+      {
+        "name": "NODE_ENV",
+        "value": "production"
+      },
+      {
+        "name": "PORT",
+        "value": "3001"
+      },
+      {
+        "name": "CORS_ALLOW_ALL",
+        "value": "true"
+      }
+    ],
+    "healthcheck": {
+      "httpGet": {
+        "path": "/api/health",
+        "port": 3001
+      },
+      "initialDelaySeconds": 30,
+      "periodSeconds": 30,
+      "timeoutSeconds": 10,
+      "failureThreshold": 3
+    }
+  },
+  "optimization": {
+    "buildCache": true,
+    "layerCaching": true,
+    "parallelBuilds": false,
+    "buildTimeout": "10m"
+  }
+}
