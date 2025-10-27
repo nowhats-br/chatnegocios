@@ -1,30 +1,30 @@
-# DOCKERFILE MÍNIMO E GARANTIDO - SOLUÇÃO URGENTE
+# DOCKERFILE SIMPLES - SEM PROXY - SOLUÇÃO DEFINITIVA
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Instalar wget para health check
+# Instalar dependências mínimas
 RUN apk add --no-cache wget
 
 # Copiar package.json
-COPY package.json package-lock.json ./
+COPY package*.json ./
 
-# Instalar dependências (SEM --only=production para evitar erros)
+# Instalar dependências
 RUN npm ci --no-audit --no-fund
 
-# Copiar todo o código
+# Copiar código
 COPY . .
 
-# Build sem TypeScript check (mais rápido e confiável)
+# Build do frontend
 RUN npm run build:fast
 
-# Criar usuário
+# Usuário não-root
 RUN adduser -D appuser
 USER appuser
 
 EXPOSE 3001
 
-ENV NODE_ENV=production
-ENV PORT=3001
+ENV NODE_ENV=production \
+    PORT=3001
 
-CMD ["node", "server/app.cjs"]
+CMD ["node", "server/app.simple.cjs"]
