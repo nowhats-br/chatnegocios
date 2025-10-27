@@ -1,0 +1,19 @@
+# DOCKERFILE SEM BUILD - SOLUÇÃO RADICAL
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copiar apenas backend e dependências mínimas
+COPY server/ ./server/
+COPY package.json ./
+
+# Instalar APENAS dependências do backend
+RUN npm install express cors dotenv --no-audit
+
+# Criar pasta dist vazia (frontend será servido pelo backend)
+RUN mkdir -p dist && echo '<!DOCTYPE html><html><body><h1>Sistema funcionando! Frontend em desenvolvimento...</h1></body></html>' > dist/index.html
+
+EXPOSE 3001
+ENV NODE_ENV=production
+
+CMD ["node", "server/app.cjs"]
