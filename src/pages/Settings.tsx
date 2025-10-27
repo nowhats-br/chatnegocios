@@ -10,6 +10,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Loader2, CheckCircle, XCircle, AlertTriangle, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
+import { UrlValidator } from '@/components/ui/UrlValidator';
 
 const settingsSchema = z.object({
   apiUrl: z.string().url("Por favor, insira uma URL válida."),
@@ -347,6 +348,9 @@ const Settings: React.FC = () => {
                         Chave de API global configurada na sua instância Evolution
                       </p>
                     </div>
+
+                    {/* Validador de URL e API Key */}
+                    <UrlValidator url={watchedApiUrl || ''} apiKey={watchedApiKey || ''} />
                   </div>
 
                   <div className="flex items-center gap-3 pt-2">

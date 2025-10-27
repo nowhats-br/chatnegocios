@@ -53,6 +53,14 @@ export function useApi<T>(): UseApiReturn<T> {
 
       const contentType = response.headers.get('content-type') || '';
 
+      // Verificar se recebeu HTML quando esperava JSON
+      if (contentType.includes('text/html')) {
+        const htmlText = await response.text().catch(() => '');
+        if (htmlText.includes('evolution-api.com') || htmlText.includes('<!doctype html>')) {
+          throw new Error('Recebido HTML da Evolution API. Verifique se a URL e API Key estão corretas. A API pode estar retornando uma página de erro ao invés de JSON.');
+        }
+      }
+
       if (!response.ok) {
         let serverMessage = `O servidor respondeu com status ${response.status}`;
         if (contentType.includes('application/json')) {
@@ -60,9 +68,11 @@ export function useApi<T>(): UseApiReturn<T> {
           if (errorJson && (errorJson.message || errorJson.error)) {
             serverMessage = errorJson.message || errorJson.error;
           }
+        } else if (contentType.includes('text/html')) {
+          serverMessage = `Servidor retornou HTML ao invés de JSON. Verifique a URL da API e as credenciais.`;
         } else {
           const errorText = await response.text().catch(() => '');
-          if (errorText) serverMessage = errorText;
+          if (errorText) serverMessage = errorText.slice(0, 200);
         }
         throw new Error(serverMessage);
       }
@@ -70,11 +80,15 @@ export function useApi<T>(): UseApiReturn<T> {
       let responseData: T | null = null;
       if (contentType.includes('application/json')) {
         responseData = (await response.json()) as T;
+      } else if (contentType.includes('text/html')) {
+        // Se recebeu HTML, é um erro
+        const htmlText = await response.text().catch(() => '');
+        throw new Error(`API retornou HTML ao invés de JSON. Isso geralmente indica URL incorreta ou problema de autenticação. Conteúdo: ${htmlText.slice(0, 100)}...`);
       } else {
-        // Fallback para respostas não-JSON (registrar texto e retornar null)
+        // Fallback para outras respostas não-JSON
         const text = await response.text().catch(() => '');
         if (text && !options.suppressInfoToast) {
-          toast.info('Resposta não-JSON recebida da API', { description: text.slice(0, 200) });
+          toast.warning('Resposta não-JSON recebida da API', { description: `Tipo: ${contentType}, Conteúdo: ${text.slice(0, 100)}...` });
         }
         responseData = null;
       }
