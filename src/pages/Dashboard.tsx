@@ -1,9 +1,10 @@
 import React from 'react';
 import { Activity, CheckCircle, DollarSign, Users, BarChart, TrendingUp, UserPlus } from 'lucide-react';
 import StatCard from '@/components/dashboard/StatCard';
-import OverviewChart from '@/components/dashboard/OverviewChart';
-import ChannelsChart from '@/components/dashboard/ChannelsChart';
-import RecentActivity from '@/components/dashboard/RecentActivity';
+// Componentes removidos para otimizar bundle
+// import OverviewChart from '@/components/dashboard/OverviewChart';
+// import ChannelsChart from '@/components/dashboard/ChannelsChart';
+// import RecentActivity from '@/components/dashboard/RecentActivity';
 import { useAuth } from '@/contexts/AuthContext';
 
 const Dashboard: React.FC = () => {
@@ -33,21 +34,23 @@ const Dashboard: React.FC = () => {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <div className="lg:col-span-5 p-4 rounded-lg glassmorphism">
           <h3 className="typography-h4 mb-4 flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary" /> Visão Geral de Atendimentos</h3>
-          <div className="h-[350px]">
-            <OverviewChart />
+          <div className="h-[350px] flex items-center justify-center bg-muted/20 rounded-lg">
+            <p className="text-muted-foreground">Gráfico em desenvolvimento</p>
           </div>
         </div>
         <div className="lg:col-span-2 p-4 rounded-lg glassmorphism">
           <h3 className="typography-h4 mb-4 flex items-center"><TrendingUp className="mr-2 h-5 w-5 text-primary" /> Canais de Atendimento</h3>
-          <div className="h-[350px]">
-            <ChannelsChart />
+          <div className="h-[350px] flex items-center justify-center bg-muted/20 rounded-lg">
+            <p className="text-muted-foreground">Gráfico em desenvolvimento</p>
           </div>
         </div>
       </div>
 
       <div className="p-4 rounded-lg glassmorphism">
         <h3 className="typography-h4 mb-4 flex items-center"><Users className="mr-2 h-5 w-5 text-primary" /> Atendimentos Recentes</h3>
-        <RecentActivity />
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">Atividades recentes em desenvolvimento</p>
+        </div>
       </div>
     </div>
   );
