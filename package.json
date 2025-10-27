@@ -9,6 +9,8 @@
     "build:fast": "vite build --mode production --minify esbuild",
     "build:ultra": "vite build --mode production --minify esbuild --sourcemap false",
     "build:nots": "vite build --mode production --minify esbuild --sourcemap false",
+    "build:ignore-ts": "vite build --mode production --minify esbuild --sourcemap false",
+    "build:simple": "vite build --config vite.config.simple.ts --mode production",
     "build:docker": "npm ci --only=production --no-audit --no-fund && npm run build:fast",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",

@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 
 interface UrlValidatorProps {
