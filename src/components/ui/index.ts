@@ -11,7 +11,7 @@ export { default as StatusHistory } from './StatusHistory';
 export type { StatusHistoryItem } from './StatusHistory';
 export { default as StatusDashboard } from './StatusDashboard';
 export type { StatusMetrics } from './StatusDashboard';
-export { default as StatusDemo } from './StatusDemo';
+
 
 // Core UI Components
 export { default as Button } from './Button';
