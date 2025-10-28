@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 import { 
   Search, 
   RotateCcw, 
@@ -14,13 +15,20 @@ import {
   ChevronDown,
   Send,
   Paperclip,
-  Smile
+  Smile,
+  RefreshCw,
+  Bell,
+  BellOff,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { Conversation, ConversationStatus, Message } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/hooks/useNotifications';
 import Button from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ConversationWithDetails extends Conversation {
   lastMessage?: Message;
@@ -32,12 +40,59 @@ export default function Atendimentos() {
   const [activeConversation, setActiveConversation] = useState<ConversationWithDetails | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
+  const [syncing, setSyncing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [showInternalNotes, setShowInternalNotes] = useState(false);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  
   const { user } = useAuth();
+  const { permission, requestPermission, showNotification, playNotificationSound } = useNotifications();
+  
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const messagesChannelRef = useRef<RealtimeChannel | null>(null);
+
+  // Sincronizar conversas do WhatsApp
+  const syncWhatsAppChats = useCallback(async () => {
+    setSyncing(true);
+    try {
+      // Buscar conexões ativas do usuário
+      const connections = await dbClient.connections.list();
+      const activeConnections = connections.filter(c => c.status === 'CONNECTED');
+      
+      if (activeConnections.length === 0) {
+        toast.warning('Nenhuma conexão ativa encontrada', { 
+          description: 'Configure uma conexão do WhatsApp primeiro' 
+        });
+        return;
+      }
+
+      // Sincronizar chats para cada conexão ativa
+      for (const connection of activeConnections) {
+        try {
+          await dbClient.evolution.syncChats({
+            connection_id: connection.id,
+            instance_name: connection.instance_name,
+            limit: 20
+          });
+        } catch (error: any) {
+          console.error(`Erro ao sincronizar ${connection.instance_name}:`, error);
+        }
+      }
+      
+      toast.success('Conversas sincronizadas com sucesso!');
+      // Recarregar conversas após sincronização
+      await fetchConversations();
+    } catch (error: any) {
+      toast.error('Erro ao sincronizar conversas', { description: error.message });
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -79,18 +134,170 @@ export default function Atendimentos() {
     }
   }, []);
 
+  // Inicialização e sincronização automática
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    const initializeData = async () => {
+      await fetchConversations();
+      // Sincronizar automaticamente na inicialização
+      await syncWhatsAppChats();
+    };
+    
+    initializeData();
+    
+    // Auto-sync a cada 5 minutos
+    const syncInterval = setInterval(() => {
+      syncWhatsAppChats();
+    }, 5 * 60 * 1000);
+    
+    return () => clearInterval(syncInterval);
+  }, [fetchConversations, syncWhatsAppChats]);
+
+  // Configurar tempo real do Supabase
+  useEffect(() => {
+    if (!user) return;
+
+    // Limpar canais existentes
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+    if (messagesChannelRef.current) {
+      supabase.removeChannel(messagesChannelRef.current);
+      messagesChannelRef.current = null;
+    }
+
+    // Canal para conversas
+    const conversationsChannel = supabase.channel(`conversations-${user.id}`);
+    
+    conversationsChannel
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'conversations', 
+        filter: `user_id=eq.${user.id}` 
+      }, (payload: any) => {
+        console.log('Conversa atualizada:', payload);
+        fetchConversations();
+      })
+      .subscribe((status: string, err: any) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Conectado ao canal de conversas em tempo real!');
+          setIsRealtimeConnected(true);
+        }
+        if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Erro no canal de conversas:', err);
+          setIsRealtimeConnected(false);
+          toast.error("Erro na conexão em tempo real", { description: err?.message });
+        }
+      });
+
+    // Canal para mensagens
+    const messagesChannel = supabase.channel(`messages-${user.id}`);
+    
+    messagesChannel
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages', 
+        filter: `user_id=eq.${user.id}` 
+      }, (payload: any) => {
+        const newMessage = payload.new as Message;
+        console.log('Nova mensagem recebida:', newMessage);
+        
+        // Atualizar lista de conversas (mover para o topo)
+        setConversations(prev => {
+          const convIndex = prev.findIndex(c => c.id === newMessage.conversation_id);
+          if (convIndex > -1) {
+            const updatedConv = { ...prev[convIndex], updated_at: new Date().toISOString() };
+            const newList = [...prev];
+            newList.splice(convIndex, 1);
+            return [updatedConv, ...newList];
+          }
+          return prev;
+        });
+
+        // Atualizar contador de não lidas se não for mensagem do usuário
+        if (!newMessage.sender_is_user && activeConversation?.id !== newMessage.conversation_id) {
+          setUnreadCounts(prev => ({
+            ...prev,
+            [newMessage.conversation_id]: (prev[newMessage.conversation_id] || 0) + 1
+          }));
+          
+          // Mostrar notificação e tocar som
+          if (notificationsEnabled) {
+            const conversation = conversations.find(c => c.id === newMessage.conversation_id);
+            const contactName = conversation?.contacts?.name || conversation?.contacts?.phone_number || 'Contato desconhecido';
+            
+            showNotification({
+              title: 'Nova mensagem no WhatsApp',
+              body: `${contactName}: ${newMessage.content?.substring(0, 50)}${newMessage.content && newMessage.content.length > 50 ? '...' : ''}`,
+              tag: `message-${newMessage.conversation_id}`,
+            });
+            
+            playNotificationSound();
+          }
+        }
+
+        // Se é a conversa ativa, atualizar mensagens
+        if (activeConversation?.id === newMessage.conversation_id) {
+          setMessages(prev => [...prev, newMessage]);
+        }
+      })
+      .subscribe((status: string, err: any) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Conectado ao canal de mensagens em tempo real!');
+        }
+        if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Erro no canal de mensagens:', err);
+        }
+      });
+
+    channelRef.current = conversationsChannel;
+    messagesChannelRef.current = messagesChannel;
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+      if (messagesChannelRef.current) {
+        supabase.removeChannel(messagesChannelRef.current);
+      }
+    };
+  }, [user, fetchConversations, activeConversation, conversations, notificationsEnabled, showNotification, playNotificationSound]);
 
   useEffect(() => {
     if (activeConversation) {
       fetchMessages(activeConversation.id);
+      // Limpar contador de não lidas
+      setUnreadCounts(prev => ({
+        ...prev,
+        [activeConversation.id]: 0
+      }));
     }
   }, [activeConversation, fetchMessages]);
 
   const handleSelectConversation = (conversation: ConversationWithDetails) => {
     setActiveConversation(conversation);
+    // Limpar contador de não lidas
+    setUnreadCounts(prev => ({
+      ...prev,
+      [conversation.id]: 0
+    }));
+  };
+
+  const handleToggleNotifications = async () => {
+    if (permission === 'default') {
+      const result = await requestPermission();
+      if (result === 'granted') {
+        setNotificationsEnabled(true);
+        toast.success('Notificações ativadas!');
+      } else {
+        toast.error('Permissão para notificações negada');
+      }
+    } else {
+      setNotificationsEnabled(!notificationsEnabled);
+      toast.success(notificationsEnabled ? 'Notificações desativadas' : 'Notificações ativadas');
+    }
   };
 
   const handleSendMessage = async () => {
@@ -147,7 +354,52 @@ export default function Atendimentos() {
       <div className="w-80 bg-white border-r flex flex-col">
         {/* Header */}
         <div className="p-4 border-b bg-green-600 text-white">
-          <h1 className="text-lg font-semibold">Caixa de Entrada</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-semibold">Caixa de Entrada</h1>
+            <div className="flex items-center gap-2">
+              {/* Status de conexão em tempo real */}
+              <div className="flex items-center gap-1 text-xs">
+                {isRealtimeConnected ? (
+                  <>
+                    <Wifi className="w-3 h-3" />
+                    <span>Online</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-3 h-3" />
+                    <span>Offline</span>
+                  </>
+                )}
+              </div>
+              
+              {/* Botão de notificações */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleToggleNotifications}
+                className="text-white hover:bg-white/20 p-1"
+                title={notificationsEnabled ? 'Desativar notificações' : 'Ativar notificações'}
+              >
+                {notificationsEnabled && permission === 'granted' ? (
+                  <Bell className="w-4 h-4" />
+                ) : (
+                  <BellOff className="w-4 h-4" />
+                )}
+              </Button>
+              
+              {/* Botão de sincronização */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={syncWhatsAppChats}
+                disabled={syncing}
+                className="text-white hover:bg-white/20 p-1"
+                title="Sincronizar conversas do WhatsApp"
+              >
+                <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* Busca */}
@@ -186,13 +438,40 @@ export default function Atendimentos() {
 
         {/* Lista de conversas */}
         <div className="flex-1 overflow-y-auto">
+          {syncing && (
+            <div className="p-3 bg-blue-50 border-b text-center">
+              <div className="flex items-center justify-center gap-2 text-blue-600 text-sm">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Sincronizando conversas do WhatsApp...</span>
+              </div>
+            </div>
+          )}
+          
           {loading ? (
             <div className="flex justify-center items-center h-32">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
             </div>
           ) : filteredConversations.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              Nenhuma conversa encontrada
+              <div className="mb-4">
+                <User className="w-16 h-16 mx-auto text-gray-300" />
+              </div>
+              <h3 className="font-medium text-gray-700 mb-2">Nenhuma conversa encontrada</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                {activeFilter === 'pending' 
+                  ? 'Não há conversas pendentes no momento'
+                  : `Não há conversas ${activeFilter === 'active' ? 'ativas' : 'finalizadas'}`
+                }
+              </p>
+              <Button
+                onClick={syncWhatsAppChats}
+                disabled={syncing}
+                size="sm"
+                className="bg-green-500 hover:bg-green-600"
+              >
+                <RefreshCw className={cn("w-4 h-4 mr-2", syncing && "animate-spin")} />
+                Sincronizar WhatsApp
+              </Button>
             </div>
           ) : (
             filteredConversations.map((conversation) => (
@@ -209,9 +488,9 @@ export default function Atendimentos() {
                     <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
                       <User className="w-6 h-6 text-gray-600" />
                     </div>
-                    {conversation.unreadCount && conversation.unreadCount > 0 && (
+                    {(conversation.unreadCount || unreadCounts[conversation.id]) && (conversation.unreadCount || unreadCounts[conversation.id]) > 0 && (
                       <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 text-white text-xs rounded-full flex items-center justify-center">
-                        {conversation.unreadCount}
+                        {conversation.unreadCount || unreadCounts[conversation.id]}
                       </div>
                     )}
                   </div>
