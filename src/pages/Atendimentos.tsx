@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
 import { 
   Search, 
   RotateCcw, 
@@ -26,9 +25,9 @@ import { Conversation, ConversationStatus, Message } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import Button from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
-import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ConversationWithDetails extends Conversation {
   lastMessage?: Message;
@@ -46,21 +45,22 @@ export default function Atendimentos() {
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [showInternalNotes, setShowInternalNotes] = useState(false);
-  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   
   const { user } = useAuth();
   const { permission, requestPermission, showNotification, playNotificationSound } = useNotifications();
-  
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  const messagesChannelRef = useRef<RealtimeChannel | null>(null);
+  const { 
+    isConnected: isWebSocketConnected, 
+    setupWebhookForInstance,
+    setOnNewMessage,
+    setOnConnectionUpdate 
+  } = useWebSocket();
 
-  // Sincronizar conversas do WhatsApp
-  const syncWhatsAppChats = useCallback(async () => {
+  // Configurar webhooks automaticamente para conexões ativas
+  const setupWebhooksForActiveConnections = useCallback(async () => {
     setSyncing(true);
     try {
-      // Buscar conexões ativas do usuário
       const connections = await dbClient.connections.list();
       const activeConnections = connections.filter(c => c.status === 'CONNECTED');
       
@@ -71,28 +71,30 @@ export default function Atendimentos() {
         return;
       }
 
-      // Sincronizar chats para cada conexão ativa
+      let successCount = 0;
       for (const connection of activeConnections) {
         try {
-          await dbClient.evolution.syncChats({
-            connection_id: connection.id,
-            instance_name: connection.instance_name,
-            limit: 20
-          });
+          const success = await setupWebhookForInstance(connection.instance_name);
+          if (success) successCount++;
         } catch (error: any) {
-          console.error(`Erro ao sincronizar ${connection.instance_name}:`, error);
+          console.error(`Erro ao configurar webhook para ${connection.instance_name}:`, error);
         }
       }
       
-      toast.success('Conversas sincronizadas com sucesso!');
-      // Recarregar conversas após sincronização
+      if (successCount > 0) {
+        toast.success(`Webhooks configurados para ${successCount} instância(s)!`, {
+          description: 'As mensagens agora chegam automaticamente em tempo real'
+        });
+      }
+      
+      // Recarregar conversas após configuração
       await fetchConversations();
     } catch (error: any) {
-      toast.error('Erro ao sincronizar conversas', { description: error.message });
+      toast.error('Erro ao configurar webhooks', { description: error.message });
     } finally {
       setSyncing(false);
     }
-  }, []);
+  }, [setupWebhookForInstance]);
 
   const fetchConversations = useCallback(async () => {
     setLoading(true);
@@ -134,136 +136,67 @@ export default function Atendimentos() {
     }
   }, []);
 
-  // Inicialização e sincronização automática
+  // Inicialização
   useEffect(() => {
     const initializeData = async () => {
       await fetchConversations();
-      // Sincronizar automaticamente na inicialização
-      await syncWhatsAppChats();
+      // Configurar webhooks automaticamente na inicialização
+      await setupWebhooksForActiveConnections();
     };
     
     initializeData();
-    
-    // Auto-sync a cada 5 minutos
-    const syncInterval = setInterval(() => {
-      syncWhatsAppChats();
-    }, 5 * 60 * 1000);
-    
-    return () => clearInterval(syncInterval);
-  }, [fetchConversations, syncWhatsAppChats]);
+  }, [fetchConversations, setupWebhooksForActiveConnections]);
 
-  // Configurar tempo real do Supabase
+  // Configurar callbacks do WebSocket
   useEffect(() => {
-    if (!user) return;
-
-    // Limpar canais existentes
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-    if (messagesChannelRef.current) {
-      supabase.removeChannel(messagesChannelRef.current);
-      messagesChannelRef.current = null;
-    }
-
-    // Canal para conversas
-    const conversationsChannel = supabase.channel(`conversations-${user.id}`);
-    
-    conversationsChannel
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'conversations', 
-        filter: `user_id=eq.${user.id}` 
-      }, (payload: any) => {
-        console.log('Conversa atualizada:', payload);
-        fetchConversations();
-      })
-      .subscribe((status: string, err: any) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Conectado ao canal de conversas em tempo real!');
-          setIsRealtimeConnected(true);
-        }
-        if (status === 'CHANNEL_ERROR') {
-          console.error('❌ Erro no canal de conversas:', err);
-          setIsRealtimeConnected(false);
-          toast.error("Erro na conexão em tempo real", { description: err?.message });
-        }
-      });
-
-    // Canal para mensagens
-    const messagesChannel = supabase.channel(`messages-${user.id}`);
-    
-    messagesChannel
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'messages', 
-        filter: `user_id=eq.${user.id}` 
-      }, (payload: any) => {
-        const newMessage = payload.new as Message;
-        console.log('Nova mensagem recebida:', newMessage);
+    // Callback para novas mensagens via WebSocket
+    setOnNewMessage((message) => {
+      console.log('[WebSocket] Nova mensagem recebida:', message);
+      
+      // Recarregar conversas para atualizar a lista
+      fetchConversations();
+      
+      // Atualizar contador de não lidas se não for a conversa ativa
+      if (activeConversation?.id !== message.conversationId) {
+        setUnreadCounts(prev => ({
+          ...prev,
+          [message.conversationId]: (prev[message.conversationId] || 0) + 1
+        }));
         
-        // Atualizar lista de conversas (mover para o topo)
-        setConversations(prev => {
-          const convIndex = prev.findIndex(c => c.id === newMessage.conversation_id);
-          if (convIndex > -1) {
-            const updatedConv = { ...prev[convIndex], updated_at: new Date().toISOString() };
-            const newList = [...prev];
-            newList.splice(convIndex, 1);
-            return [updatedConv, ...newList];
-          }
-          return prev;
-        });
-
-        // Atualizar contador de não lidas se não for mensagem do usuário
-        if (!newMessage.sender_is_user && activeConversation?.id !== newMessage.conversation_id) {
-          setUnreadCounts(prev => ({
-            ...prev,
-            [newMessage.conversation_id]: (prev[newMessage.conversation_id] || 0) + 1
-          }));
+        // Mostrar notificação e tocar som
+        if (notificationsEnabled) {
+          showNotification({
+            title: 'Nova mensagem no WhatsApp',
+            body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
+            tag: `message-${message.conversationId}`,
+          });
           
-          // Mostrar notificação e tocar som
-          if (notificationsEnabled) {
-            const conversation = conversations.find(c => c.id === newMessage.conversation_id);
-            const contactName = conversation?.contacts?.name || conversation?.contacts?.phone_number || 'Contato desconhecido';
-            
-            showNotification({
-              title: 'Nova mensagem no WhatsApp',
-              body: `${contactName}: ${newMessage.content?.substring(0, 50)}${newMessage.content && newMessage.content.length > 50 ? '...' : ''}`,
-              tag: `message-${newMessage.conversation_id}`,
-            });
-            
-            playNotificationSound();
-          }
+          playNotificationSound();
         }
-
-        // Se é a conversa ativa, atualizar mensagens
-        if (activeConversation?.id === newMessage.conversation_id) {
-          setMessages(prev => [...prev, newMessage]);
-        }
-      })
-      .subscribe((status: string, err: any) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Conectado ao canal de mensagens em tempo real!');
-        }
-        if (status === 'CHANNEL_ERROR') {
-          console.error('❌ Erro no canal de mensagens:', err);
-        }
-      });
-
-    channelRef.current = conversationsChannel;
-    messagesChannelRef.current = messagesChannel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
       }
-      if (messagesChannelRef.current) {
-        supabase.removeChannel(messagesChannelRef.current);
+      
+      // Se é a conversa ativa, recarregar mensagens
+      if (activeConversation?.id === message.conversationId) {
+        fetchMessages(message.conversationId);
       }
-    };
-  }, [user, fetchConversations, activeConversation, conversations, notificationsEnabled, showNotification, playNotificationSound]);
+    });
+
+    // Callback para atualizações de conexão
+    setOnConnectionUpdate((update) => {
+      console.log('[WebSocket] Atualização de conexão:', update);
+      // Recarregar conversas quando houver mudança de status
+      fetchConversations();
+    });
+  }, [
+    setOnNewMessage, 
+    setOnConnectionUpdate, 
+    fetchConversations, 
+    fetchMessages, 
+    activeConversation, 
+    notificationsEnabled, 
+    showNotification, 
+    playNotificationSound
+  ]);
 
   useEffect(() => {
     if (activeConversation) {
@@ -357,12 +290,12 @@ export default function Atendimentos() {
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">Caixa de Entrada</h1>
             <div className="flex items-center gap-2">
-              {/* Status de conexão em tempo real */}
+              {/* Status de conexão WebSocket */}
               <div className="flex items-center gap-1 text-xs">
-                {isRealtimeConnected ? (
+                {isWebSocketConnected ? (
                   <>
                     <Wifi className="w-3 h-3" />
-                    <span>Online</span>
+                    <span>WebSocket</span>
                   </>
                 ) : (
                   <>
@@ -387,14 +320,14 @@ export default function Atendimentos() {
                 )}
               </Button>
               
-              {/* Botão de sincronização */}
+              {/* Botão de configurar webhooks */}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={syncWhatsAppChats}
+                onClick={setupWebhooksForActiveConnections}
                 disabled={syncing}
                 className="text-white hover:bg-white/20 p-1"
-                title="Sincronizar conversas do WhatsApp"
+                title="Configurar webhooks para receber mensagens automaticamente"
               >
                 <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
               </Button>
@@ -442,7 +375,7 @@ export default function Atendimentos() {
             <div className="p-3 bg-blue-50 border-b text-center">
               <div className="flex items-center justify-center gap-2 text-blue-600 text-sm">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Sincronizando conversas do WhatsApp...</span>
+                <span>Configurando webhooks do WhatsApp...</span>
               </div>
             </div>
           )}
@@ -464,13 +397,13 @@ export default function Atendimentos() {
                 }
               </p>
               <Button
-                onClick={syncWhatsAppChats}
+                onClick={setupWebhooksForActiveConnections}
                 disabled={syncing}
                 size="sm"
                 className="bg-green-500 hover:bg-green-600"
               >
                 <RefreshCw className={cn("w-4 h-4 mr-2", syncing && "animate-spin")} />
-                Sincronizar WhatsApp
+                Configurar Webhooks
               </Button>
             </div>
           ) : (
