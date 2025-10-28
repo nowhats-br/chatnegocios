@@ -254,49 +254,68 @@ const handleDisconnect = async (connection: Connection) => {
     setIsCreating(true);
 
     try {
-      // Primeiro criar na API Evolution
+      // Primeiro criar no banco local com status DISCONNECTED
+      const created = await dbClient.connections.create({
+        instance_name: newConnectionName,
+        status: 'DISCONNECTED',
+        instance_data: { 
+          created_at: new Date().toISOString(),
+          api_created: false 
+        },
+      });
+
+      setConnections(prev => [created, ...prev]);
+
+      // Tentar criar na API Evolution em background
       const webhookUrl = `${window.location.origin}/api/whatsapp/webhook?uid=${encodeURIComponent(user.id)}`;
 
       const createPayload = {
         instanceName: newConnectionName,
         qrcode: true,
         integration: 'WHATSAPP-BAILEYS',
-        webhook: webhookUrl,
-        webhook_by_events: true,
-        webhook_base64: false,
-        events: [
-          'APPLICATION_STARTUP',
-          'QRCODE_UPDATED', 
-          'CONNECTION_UPDATE',
-          'MESSAGES_UPSERT'
-        ],
+        webhook: {
+          url: webhookUrl,
+          byEvents: true,
+          base64: false,
+          events: [
+            'APPLICATION_STARTUP',
+            'QRCODE_UPDATED', 
+            'CONNECTION_UPDATE',
+            'MESSAGES_UPSERT'
+          ]
+        }
       };
 
-      // Criar na API Evolution primeiro
-      const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
-        method: 'POST',
-        body: JSON.stringify(createPayload),
-        suppressToast: true,
-      });
+      try {
+        const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
+          method: 'POST',
+          body: JSON.stringify(createPayload),
+          suppressToast: true,
+        });
 
-      if (!creationResponse || creationResponse.status === 'error') {
-        throw new Error('Falha ao criar instância na API Evolution');
+        if (creationResponse && creationResponse.status !== 'error') {
+          // Atualizar com dados da API Evolution
+          await dbClient.connections.update(created.id, {
+            instance_data: {
+              ...creationResponse,
+              created_at: new Date().toISOString(),
+              api_created: true
+            }
+          });
+          
+          toast.success(`Instância "${newConnectionName}" criada com sucesso no manager da API Evolution.`);
+        } else {
+          toast.warning(`Instância "${newConnectionName}" criada localmente`, { 
+            description: 'Não foi possível criar na API Evolution. Você pode tentar conectar manualmente.' 
+          });
+        }
+      } catch (apiError: any) {
+        console.warn('Erro ao criar na API Evolution:', apiError.message);
+        toast.warning(`Instância "${newConnectionName}" criada localmente`, { 
+          description: `Erro na API Evolution: ${apiError.message}` 
+        });
       }
 
-      // Agora criar no banco local com status DISCONNECTED
-      const created = await dbClient.connections.create({
-        instance_name: newConnectionName,
-        status: 'DISCONNECTED',
-        instance_data: {
-          ...creationResponse,
-          created_at: new Date().toISOString(),
-          api_created: true
-        },
-      });
-
-      setConnections(prev => [created, ...prev]);
-      toast.success(`Instância "${newConnectionName}" criada com sucesso no manager da API Evolution.`);
-      
       setIsCreateModalOpen(false);
       setNewConnectionName('');
 

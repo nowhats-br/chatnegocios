@@ -5,14 +5,24 @@ import Button from '@/components/ui/Button';
 import { Conversation, ConversationStatus } from '@/types/database';
 import { cn } from '@/lib/utils';
 
+type ConversationWithLastMessage = Conversation & {
+  lastMessage?: {
+    content: string | null;
+    created_at: string;
+    sender_is_user: boolean;
+    message_type: string;
+  } | null;
+};
+
 interface ConversationListProps {
-  conversations: Conversation[];
+  conversations: ConversationWithLastMessage[];
   activeConversationId?: string;
-  onSelectConversation: (conversation: Conversation) => void;
-  onOpenTicket: (conversation: Conversation) => Promise<void> | void;
+  onSelectConversation: (conversation: ConversationWithLastMessage) => void;
+  onOpenTicket: (conversation: ConversationWithLastMessage) => Promise<void> | void;
   loading: boolean;
   activeFilter: ConversationStatus;
   onFilterChange: (status: ConversationStatus) => void;
+  unreadCounts?: Record<string, number>;
 }
 
 const ConversationList: React.FC<ConversationListProps> = ({
@@ -22,13 +32,25 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onOpenTicket,
   loading,
   activeFilter,
-  onFilterChange
+  onFilterChange,
+  unreadCounts = {}
 }) => {
 
-  const filters: { label: string; value: ConversationStatus }[] = [
-    { label: 'Pendentes', value: 'pending' },
-    { label: 'Ativas', value: 'active' },
-    { label: 'Resolvidas', value: 'resolved' },
+  const getFilterCounts = () => {
+    const counts = {
+      pending: conversations.filter(c => c.status === 'pending').length,
+      active: conversations.filter(c => c.status === 'active').length,
+      resolved: conversations.filter(c => c.status === 'resolved').length,
+    };
+    return counts;
+  };
+
+  const filterCounts = getFilterCounts();
+
+  const filters: { label: string; value: ConversationStatus; count: number }[] = [
+    { label: 'Pendentes', value: 'pending', count: filterCounts.pending },
+    { label: 'Ativas', value: 'active', count: filterCounts.active },
+    { label: 'Resolvidas', value: 'resolved', count: filterCounts.resolved },
   ];
 
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -61,8 +83,19 @@ const ConversationList: React.FC<ConversationListProps> = ({
               value={filter.value} 
               activeValue={activeFilter} 
               onClick={() => onFilterChange(filter.value)}
+              className="relative"
             >
               {filter.label}
+              {filter.count > 0 && (
+                <span className={cn(
+                  "ml-2 px-2 py-0.5 text-xs rounded-full",
+                  filter.value === 'pending' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+                  filter.value === 'active' && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+                  filter.value === 'resolved' && "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                )}>
+                  {filter.count}
+                </span>
+              )}
             </TabsTrigger>
           ))}
         </Tabs>
@@ -79,54 +112,109 @@ const ConversationList: React.FC<ConversationListProps> = ({
               </p>
             </div>
         ) : (
-          filteredConversations.map(convo => (
-            <div
-              key={convo.id}
-              onClick={() => onSelectConversation(convo)}
-              className={cn(
-                "p-4 flex items-center space-x-3 cursor-pointer hover:bg-accent",
-                convo.id === activeConversationId && "bg-secondary"
-              )}
-            >
-              <div className="relative">
-                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-                  {convo.contacts?.avatar_url ? (
-                    <img src={convo.contacts.avatar_url} alt={convo.contacts.name || 'Avatar'} className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    <User className="h-6 w-6 text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-center">
-                  <p className="font-semibold truncate">{convo.contacts?.name || convo.contacts?.phone_number || 'Desconhecido'}</p>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <p className="text-xs text-muted-foreground">{new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
-                    {convo.status === 'pending' && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Abrir ticket"
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setOpeningId(convo.id);
-                          Promise.resolve(onOpenTicket(convo)).finally(() => setOpeningId(null));
-                        }}
-                        disabled={openingId === convo.id}
-                      >
-                        {openingId === convo.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Ticket className="h-4 w-4" />
-                        )}
-                      </Button>
+          filteredConversations.map(convo => {
+            const unreadCount = unreadCounts[convo.id] || 0;
+            const hasUnread = unreadCount > 0;
+            
+            return (
+              <div
+                key={convo.id}
+                onClick={() => onSelectConversation(convo)}
+                className={cn(
+                  "p-4 flex items-center space-x-3 cursor-pointer hover:bg-accent transition-colors",
+                  convo.id === activeConversationId && "bg-secondary border-r-2 border-primary",
+                  hasUnread && "bg-blue-50 dark:bg-blue-950/20"
+                )}
+              >
+                <div className="relative">
+                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                    {convo.contacts?.avatar_url ? (
+                      <img src={convo.contacts.avatar_url} alt={convo.contacts.name || 'Avatar'} className="w-full h-full rounded-full object-cover" />
+                    ) : (
+                      <User className="h-6 w-6 text-muted-foreground" />
                     )}
                   </div>
+                  {/* Indicador de status */}
+                  <div className={cn(
+                    "absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-gray-900",
+                    convo.status === 'active' && "bg-green-500",
+                    convo.status === 'pending' && "bg-yellow-500",
+                    convo.status === 'resolved' && "bg-gray-400"
+                  )} />
                 </div>
-                <p className="text-sm text-muted-foreground truncate">Última mensagem aqui...</p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-center">
+                    <p className={cn(
+                      "truncate",
+                      hasUnread ? "font-bold text-foreground" : "font-semibold"
+                    )}>
+                      {convo.contacts?.name || convo.contacts?.phone_number || 'Desconhecido'}
+                    </p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(convo.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      {hasUnread && (
+                        <div className="bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </div>
+                      )}
+                      {convo.status === 'pending' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Abrir ticket"
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setOpeningId(convo.id);
+                            Promise.resolve(onOpenTicket(convo)).finally(() => setOpeningId(null));
+                          }}
+                          disabled={openingId === convo.id}
+                          className="h-8 w-8"
+                        >
+                          {openingId === convo.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Ticket className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <p className={cn(
+                      "text-sm truncate flex-1 mr-2",
+                      hasUnread ? "text-foreground font-medium" : "text-muted-foreground"
+                    )}>
+                      {convo.lastMessage ? (
+                        <>
+                          {convo.lastMessage.sender_is_user && (
+                            <span className="text-blue-600 mr-1">Você:</span>
+                          )}
+                          {convo.lastMessage.message_type === 'image' && '📷 Imagem'}
+                          {convo.lastMessage.message_type === 'file' && '📎 Arquivo'}
+                          {convo.lastMessage.message_type === 'text' && convo.lastMessage.content}
+                        </>
+                      ) : (
+                        'Nenhuma mensagem ainda'
+                      )}
+                    </p>
+                    {/* Badge de status */}
+                    <span className={cn(
+                      "text-xs px-2 py-0.5 rounded-full",
+                      convo.status === 'pending' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+                      convo.status === 'active' && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+                      convo.status === 'resolved' && "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                    )}>
+                      {convo.status === 'pending' && 'Pendente'}
+                      {convo.status === 'active' && 'Ativo'}
+                      {convo.status === 'resolved' && 'Resolvido'}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

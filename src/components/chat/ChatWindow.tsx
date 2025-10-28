@@ -16,6 +16,8 @@ import Popover from '../ui/Popover';
 import { dbClient } from '@/lib/dbClient';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/DropdownMenu';
 import AlertDialog from '../ui/AlertDialog';
+import { cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 type ConversationWithContact = Conversation & {
   contacts: {
@@ -196,14 +198,46 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
 
   return (
     <>
-      <div className="flex items-center justify-between p-3 bg-card/80 backdrop-blur-sm border-b">
+      <div className="flex items-center justify-between p-4 bg-card/80 backdrop-blur-sm border-b">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-            <User className="h-5 w-5 text-muted-foreground" />
+          <div className="relative">
+            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+              {conversation.contacts?.avatar_url ? (
+                <img 
+                  src={conversation.contacts.avatar_url} 
+                  alt={conversation.contacts.name || 'Avatar'} 
+                  className="w-full h-full rounded-full object-cover" 
+                />
+              ) : (
+                <User className="h-6 w-6 text-muted-foreground" />
+              )}
+            </div>
+            {/* Indicador de status */}
+            <div className={cn(
+              "absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-gray-900",
+              conversation.status === 'active' && "bg-green-500",
+              conversation.status === 'pending' && "bg-yellow-500",
+              conversation.status === 'resolved' && "bg-gray-400"
+            )} />
           </div>
           <div>
-            <p className="font-semibold">{conversation.contacts?.name || 'Desconhecido'}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-semibold">{conversation.contacts?.name || 'Desconhecido'}</p>
+              <span className={cn(
+                "text-xs px-2 py-0.5 rounded-full",
+                conversation.status === 'pending' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+                conversation.status === 'active' && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+                conversation.status === 'resolved' && "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
+              )}>
+                {conversation.status === 'pending' && 'Pendente'}
+                {conversation.status === 'active' && 'Ativo'}
+                {conversation.status === 'resolved' && 'Resolvido'}
+              </span>
+            </div>
             <p className="text-xs text-muted-foreground">{conversation.contacts?.phone_number}</p>
+            <p className="text-xs text-muted-foreground">
+              Última atividade: {new Date(conversation.updated_at).toLocaleString('pt-BR')}
+            </p>
           </div>
         </div>
         <div className="flex items-center space-x-2">

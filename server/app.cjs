@@ -209,7 +209,34 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         if (!remoteJid || remoteJid.endsWith('@g.us')) continue;
 
         const phone = remoteJid.split('@')[0];
-        const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+        
+        // Extrair conteúdo da mensagem baseado no tipo
+        let messageContent = '';
+        let messageType = 'text';
+        
+        if (msg.message?.conversation) {
+          messageContent = msg.message.conversation;
+          messageType = 'text';
+        } else if (msg.message?.extendedTextMessage?.text) {
+          messageContent = msg.message.extendedTextMessage.text;
+          messageType = 'text';
+        } else if (msg.message?.imageMessage) {
+          messageContent = msg.message.imageMessage.caption || 'Imagem';
+          messageType = 'image';
+        } else if (msg.message?.documentMessage) {
+          messageContent = msg.message.documentMessage.fileName || 'Documento';
+          messageType = 'file';
+        } else if (msg.message?.audioMessage) {
+          messageContent = 'Áudio';
+          messageType = 'audio';
+        } else if (msg.message?.videoMessage) {
+          messageContent = msg.message.videoMessage.caption || 'Vídeo';
+          messageType = 'video';
+        } else {
+          messageContent = 'Mensagem não suportada';
+          messageType = 'text';
+        }
+        
         const pushName = msg.pushName || phone;
 
         if (!phone || !messageContent) continue;
@@ -236,7 +263,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           user_id: ownerUserId,
           sender_is_user: false,
           content: messageContent,
-          message_type: 'text',
+          message_type: messageType,
         });
         if (msgError && msgError.code !== '23505') { // Ignora erro de ID duplicado
           console.error(`[Webhook] Erro ao inserir mensagem ${key.id}:`, msgError.message);
