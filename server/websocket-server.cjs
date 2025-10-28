@@ -15,7 +15,7 @@ if (!SUPABASE_AVAILABLE) {
   console.warn('\x1b[33m[WARN]\x1b[0m Variáveis do Supabase não definidas. Webhook de persistência desabilitado.');
 }
 
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3002;
 const app = express();
 const server = http.createServer(app);
 
@@ -39,6 +39,8 @@ const defaultOrigins = [
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:4173',
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
 ];
 const envOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
@@ -47,11 +49,24 @@ const corsOptions = process.env.CORS_ALLOW_ALL === 'true'
   ? { origin: true, credentials: true }
   : {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Durante desenvolvimento, permitir requisições sem origin (como fetch do mesmo servidor)
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         console.warn(`[CORS] Bloqueada origem não permitida: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
+        console.warn(`[CORS] Origens permitidas:`, allowedOrigins);
+        // Durante desenvolvimento, permitir mesmo assim
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+          console.warn(`[CORS] Permitindo origem localhost para desenvolvimento: ${origin}`);
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
       }
     },
     credentials: true,
@@ -140,6 +155,16 @@ app.get('/api/debug/webhook-config', (_req, res) => {
     supabaseAvailable: SUPABASE_AVAILABLE,
     connectedUsers: connectedUsers.size,
     webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'não configurada (usando request host)',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Endpoint simples para testar comunicação
+app.get('/api/test/ping', (_req, res) => {
+  console.log('[Test] Ping recebido');
+  res.json({
+    success: true,
+    message: 'Pong! Servidor funcionando',
     timestamp: new Date().toISOString()
   });
 });

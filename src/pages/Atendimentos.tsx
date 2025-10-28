@@ -57,45 +57,6 @@ export default function Atendimentos() {
     setOnConnectionUpdate 
   } = useWebSocket();
 
-  // Configurar webhooks automaticamente para conexões ativas
-  const setupWebhooksForActiveConnections = useCallback(async () => {
-    setSyncing(true);
-    try {
-      const connections = await dbClient.connections.list();
-      const activeConnections = connections.filter(c => c.status === 'CONNECTED');
-      
-      if (activeConnections.length === 0) {
-        toast.warning('Nenhuma conexão ativa encontrada', { 
-          description: 'Configure uma conexão do WhatsApp primeiro' 
-        });
-        return;
-      }
-
-      let successCount = 0;
-      for (const connection of activeConnections) {
-        try {
-          const success = await setupWebhookForInstance(connection.instance_name);
-          if (success) successCount++;
-        } catch (error: any) {
-          console.error(`Erro ao configurar webhook para ${connection.instance_name}:`, error);
-        }
-      }
-      
-      if (successCount > 0) {
-        toast.success(`Webhooks configurados para ${successCount} instância(s)!`, {
-          description: 'As mensagens agora chegam automaticamente em tempo real'
-        });
-      }
-      
-      // Recarregar conversas após configuração
-      await fetchConversations();
-    } catch (error: any) {
-      toast.error('Erro ao configurar webhooks', { description: error.message });
-    } finally {
-      setSyncing(false);
-    }
-  }, [setupWebhookForInstance]);
-
   const fetchConversations = useCallback(async () => {
     setLoading(true);
     try {
@@ -135,6 +96,75 @@ export default function Atendimentos() {
       toast.error('Erro ao buscar mensagens', { description: error.message });
     }
   }, []);
+
+  // Configurar webhooks automaticamente para conexões ativas
+  const setupWebhooksForActiveConnections = useCallback(async () => {
+    setSyncing(true);
+    try {
+      console.log('[Setup] 🔄 Iniciando configuração de webhooks...');
+      
+      const connections = await dbClient.connections.list();
+      console.log('[Setup] 📋 Conexões encontradas:', connections.length);
+      
+      const activeConnections = connections.filter(c => c.status === 'CONNECTED');
+      console.log('[Setup] ✅ Conexões ativas:', activeConnections.length);
+      
+      if (activeConnections.length === 0) {
+        console.log('[Setup] ⚠️ Nenhuma conexão ativa encontrada');
+        toast.warning('Nenhuma conexão ativa encontrada', { 
+          description: 'Configure uma conexão do WhatsApp primeiro' 
+        });
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+      
+      for (const connection of activeConnections) {
+        console.log(`[Setup] 🔧 Configurando webhook para: ${connection.instance_name}`);
+        try {
+          const success = await setupWebhookForInstance(connection.instance_name);
+          if (success) {
+            successCount++;
+            console.log(`[Setup] ✅ Sucesso para: ${connection.instance_name}`);
+          } else {
+            errorCount++;
+            errors.push(connection.instance_name);
+            console.log(`[Setup] ❌ Falha para: ${connection.instance_name}`);
+          }
+        } catch (error: any) {
+          errorCount++;
+          errors.push(connection.instance_name);
+          console.error(`[Setup] ❌ Erro fatal para ${connection.instance_name}:`, error);
+        }
+      }
+      
+      console.log(`[Setup] 📊 Resultado: ${successCount} sucessos, ${errorCount} erros`);
+      
+      if (successCount > 0) {
+        toast.success(`✅ Webhooks configurados para ${successCount} instância(s)!`, {
+          description: 'As mensagens agora chegam automaticamente em tempo real'
+        });
+      }
+      
+      if (errorCount > 0) {
+        toast.error(`❌ Falha em ${errorCount} instância(s)`, {
+          description: `Problemas com: ${errors.join(', ')}`
+        });
+      }
+      
+      // Recarregar conversas após configuração
+      await fetchConversations();
+    } catch (error: any) {
+      console.error('[Setup] ❌ Erro fatal ao configurar webhooks:', error);
+      toast.error('❌ Erro ao configurar webhooks', { 
+        description: error.message || 'Erro desconhecido'
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }, [setupWebhookForInstance, fetchConversations]);
 
   // Inicialização
   useEffect(() => {
@@ -233,33 +263,112 @@ export default function Atendimentos() {
     }
   };
 
-  // Função de debug para testar configuração
-  const handleDebugConfig = async () => {
+  // Função de auto-configuração e diagnóstico
+  const handleAutoSetup = async () => {
+    const toastId = toast.loading('🔧 Configurando sistema automaticamente...');
+    
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+      console.log('[AutoSetup] Backend URL:', backendUrl);
       
-      // Testar configuração do webhook
+      // 1. Testar comunicação básica
+      console.log('[AutoSetup] 1. Testando comunicação básica...');
+      toast.loading('1/5 Testando comunicação...', { id: toastId });
+      
+      const pingResponse = await fetch(`${backendUrl}/api/test/ping`);
+      if (!pingResponse.ok) {
+        throw new Error('Servidor não está respondendo. Verifique se está rodando na porta correta.');
+      }
+      const pingData = await pingResponse.json();
+      console.log('[AutoSetup] ✅ Ping OK:', pingData.message);
+      
+      // 2. Verificar configuração
+      console.log('[AutoSetup] 2. Verificando configuração...');
+      toast.loading('2/5 Verificando configuração...', { id: toastId });
+      
       const configResponse = await fetch(`${backendUrl}/api/debug/webhook-config`);
       const configData = await configResponse.json();
-      console.log('[Debug] Configuração do webhook:', configData);
+      console.log('[AutoSetup] Configuração:', configData);
       
-      // Testar conexão com Evolution API
+      // 3. Testar Evolution API
+      console.log('[AutoSetup] 3. Testando Evolution API...');
+      toast.loading('3/5 Testando Evolution API...', { id: toastId });
+      
       const evolutionResponse = await fetch(`${backendUrl}/api/debug/test-evolution`);
       const evolutionData = await evolutionResponse.json();
-      console.log('[Debug] Teste Evolution API:', evolutionData);
       
-      if (evolutionData.success) {
-        toast.success('Configuração OK!', {
-          description: 'Evolution API conectada com sucesso'
+      if (!evolutionData.success) {
+        toast.error('❌ Evolution API não configurada', {
+          id: toastId,
+          description: 'Configure EVOLUTION_API_URL e EVOLUTION_API_KEY no arquivo .env'
         });
+        return;
+      }
+      
+      console.log('[AutoSetup] ✅ Evolution API OK');
+      
+      // 4. Buscar conexões ativas
+      console.log('[AutoSetup] 4. Buscando conexões ativas...');
+      toast.loading('4/5 Buscando conexões...', { id: toastId });
+      
+      const connections = await dbClient.connections.list();
+      const activeConnections = connections.filter(c => c.status === 'CONNECTED');
+      
+      if (activeConnections.length === 0) {
+        toast.warning('⚠️ Nenhuma conexão WhatsApp ativa', {
+          id: toastId,
+          description: 'Conecte uma instância do WhatsApp primeiro'
+        });
+        return;
+      }
+      
+      console.log('[AutoSetup] ✅ Encontradas', activeConnections.length, 'conexões ativas');
+      
+      // 5. Configurar webhooks automaticamente
+      console.log('[AutoSetup] 5. Configurando webhooks...');
+      toast.loading('5/5 Configurando webhooks...', { id: toastId });
+      
+      let successCount = 0;
+      for (const connection of activeConnections) {
+        try {
+          const success = await setupWebhookForInstance(connection.instance_name);
+          if (success) successCount++;
+        } catch (error) {
+          console.error('[AutoSetup] Erro ao configurar', connection.instance_name, ':', error);
+        }
+      }
+      
+      // 6. Resultado final
+      if (successCount > 0) {
+        toast.success('🎉 Sistema configurado com sucesso!', {
+          id: toastId,
+          description: `${successCount} webhook(s) configurado(s). Mensagens chegam automaticamente agora!`
+        });
+        
+        // Recarregar conversas
+        await fetchConversations();
+        
+        console.log('[AutoSetup] ✅ Configuração completa!');
+        console.log('[AutoSetup] === RESUMO ===');
+        console.log('[AutoSetup] - Servidor:', '✅ OK');
+        console.log('[AutoSetup] - Evolution API:', '✅ OK');
+        console.log('[AutoSetup] - Conexões ativas:', activeConnections.length);
+        console.log('[AutoSetup] - Webhooks configurados:', successCount);
+        console.log('[AutoSetup] - Status:', '🎉 PRONTO PARA USO!');
+        
       } else {
-        toast.error('Problema na configuração', {
-          description: evolutionData.error
+        toast.error('❌ Falha na configuração', {
+          id: toastId,
+          description: 'Não foi possível configurar nenhum webhook'
         });
       }
+      
     } catch (error) {
-      console.error('[Debug] Erro ao testar configuração:', error);
-      toast.error('Erro ao testar configuração');
+      console.error('[AutoSetup] ❌ Erro fatal:', error);
+      toast.error('❌ Erro na configuração automática', {
+        id: toastId,
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
     }
   };
 
@@ -350,15 +459,15 @@ export default function Atendimentos() {
                 )}
               </Button>
               
-              {/* Botão de debug */}
+              {/* Botão de auto-configuração */}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleDebugConfig}
+                onClick={handleAutoSetup}
                 className="text-white hover:bg-white/20 p-1"
-                title="Testar configuração da API"
+                title="Configurar sistema automaticamente"
               >
-                🔧
+                🚀
               </Button>
               
               {/* Botão de configurar webhooks */}
