@@ -17,7 +17,6 @@ import { dbClient } from '@/lib/dbClient';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/DropdownMenu';
 import AlertDialog from '../ui/AlertDialog';
 import { cn } from '@/lib/utils';
-import { cn } from '@/lib/utils';
 
 type ConversationWithContact = Conversation & {
   contacts: {
