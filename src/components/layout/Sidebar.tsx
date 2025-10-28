@@ -18,7 +18,6 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/conexoes', icon: PlugZap, label: 'Conexões' },
-  { to: '/chat', icon: MessageSquare, label: 'Chat Realtime' },
   { to: '/atendimentos', icon: MessageSquare, label: 'Atendimentos' },
   { to: '/kanban', icon: KanbanSquare, label: 'Kanban' },
   { to: '/cadastros', icon: Users, label: 'Cadastros' },

@@ -1,26 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Conversation, ConversationStatus, Message } from '@/types/database';
-import { dbClient } from '@/lib/dbClient';
-import { useAuth } from '@/contexts/AuthContext';
 import { 
-  Search,
-  RotateCcw,
-  Calendar,
-  Clock,
-  CheckCircle,
+  Search, 
+  RotateCcw, 
+  Calendar, 
+  MoreHorizontal,
   ArrowRight,
   User,
   Phone,
-  Star,
   UserPlus,
   FileText,
-  MessageSquare,
+  Star,
   ChevronDown,
   Send,
   Paperclip,
   Smile
 } from 'lucide-react';
+import { Conversation, ConversationStatus, Message } from '@/types/database';
+import { dbClient } from '@/lib/dbClient';
+import { useAuth } from '@/contexts/AuthContext';
 import Button from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 
@@ -34,7 +32,7 @@ export default function Atendimentos() {
   const [activeConversation, setActiveConversation] = useState<ConversationWithDetails | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
+  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('active');
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
@@ -46,7 +44,6 @@ export default function Atendimentos() {
     try {
       const data = await dbClient.conversations.listWithContact();
       
-      // Buscar última mensagem para cada conversa
       const conversationsWithDetails = await Promise.all(
         data.map(async (conv) => {
           try {
@@ -133,19 +130,6 @@ export default function Atendimentos() {
     }
   };
 
-  const handleStatusChange = async (newStatus: ConversationStatus) => {
-    if (!activeConversation) return;
-
-    try {
-      await dbClient.conversations.update(activeConversation.id, { status: newStatus });
-      setActiveConversation({ ...activeConversation, status: newStatus });
-      fetchConversations();
-      toast.success(`Conversa ${newStatus === 'resolved' ? 'resolvida' : 'atualizada'}!`);
-    } catch (error: any) {
-      toast.error('Erro ao atualizar status', { description: error.message });
-    }
-  };
-
   const filteredConversations = conversations
     .filter(c => c.status === activeFilter)
     .filter(c => {
@@ -157,57 +141,45 @@ export default function Atendimentos() {
     })
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
-  const getStatusLabel = (status: ConversationStatus) => {
-    switch (status) {
-      case 'pending': return 'Aguardando';
-      case 'active': return 'Ativos';
-      case 'resolved': return 'Finalizados';
-      default: return status;
-    }
-  };
-
-  const getStatusCount = (status: ConversationStatus) => {
-    return conversations.filter(c => c.status === status).length;
-  };
-
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Sidebar esquerda */}
+      {/* Sidebar esquerda - Lista de conversas */}
       <div className="w-80 bg-white border-r flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b">
-          <h1 className="text-lg font-semibold text-gray-900">Caixa de Entrada</h1>
-          
-          {/* Busca */}
-          <div className="mt-3 relative">
+        <div className="p-4 border-b bg-green-600 text-white">
+          <h1 className="text-lg font-semibold">Caixa de Entrada</h1>
+        </div>
+
+        {/* Busca */}
+        <div className="p-3 border-b">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
               placeholder="Buscar por nome ou número"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
             />
           </div>
         </div>
 
         {/* Filtros */}
-        <div className="flex border-b">
+        <div className="flex border-b bg-gray-50">
           {(['active', 'pending', 'resolved'] as ConversationStatus[]).map((status) => (
             <button
               key={status}
               onClick={() => setActiveFilter(status)}
               className={cn(
-                "flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors",
+                "flex-1 px-3 py-2 text-sm font-medium transition-colors",
                 activeFilter === status
-                  ? "border-blue-500 text-blue-600 bg-blue-50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "bg-white text-green-600 border-b-2 border-green-600"
+                  : "text-gray-600 hover:text-gray-800"
               )}
             >
-              {getStatusLabel(status)}
-              <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">
-                {getStatusCount(status)}
-              </span>
+              {status === 'active' && 'Ativos'}
+              {status === 'pending' && 'Aguardando'}
+              {status === 'resolved' && 'Finalizados'}
             </button>
           ))}
         </div>
@@ -216,7 +188,7 @@ export default function Atendimentos() {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex justify-center items-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
             </div>
           ) : filteredConversations.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
@@ -228,13 +200,20 @@ export default function Atendimentos() {
                 key={conversation.id}
                 onClick={() => handleSelectConversation(conversation)}
                 className={cn(
-                  "p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors",
-                  activeConversation?.id === conversation.id && "bg-blue-50 border-r-2 border-r-blue-500"
+                  "p-3 border-b cursor-pointer hover:bg-gray-50 transition-colors",
+                  activeConversation?.id === conversation.id && "bg-green-50 border-r-4 border-r-green-500"
                 )}
               >
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
-                    <User className="w-5 h-5 text-gray-600" />
+                  <div className="relative">
+                    <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                      <User className="w-6 h-6 text-gray-600" />
+                    </div>
+                    {conversation.unreadCount && conversation.unreadCount > 0 && (
+                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 text-white text-xs rounded-full flex items-center justify-center">
+                        {conversation.unreadCount}
+                      </div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
@@ -251,12 +230,10 @@ export default function Atendimentos() {
                     <p className="text-sm text-gray-600 truncate mt-1">
                       {conversation.lastMessage?.content || 'Nenhuma mensagem'}
                     </p>
-                    {conversation.unreadCount && conversation.unreadCount > 0 && (
-                      <div className="mt-2">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          {conversation.unreadCount} nova{conversation.unreadCount > 1 ? 's' : ''}
-                        </span>
-                      </div>
+                    {conversation.status === 'active' && (
+                      <span className="inline-block mt-1 text-xs text-green-600 font-medium">
+                        Online
+                      </span>
                     )}
                   </div>
                 </div>
@@ -271,66 +248,66 @@ export default function Atendimentos() {
         {activeConversation ? (
           <>
             {/* Header do chat */}
-            <div className="bg-white border-b p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center">
-                    <User className="w-5 h-5 text-gray-600" />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-gray-900">
-                      {activeConversation.contacts?.name || 'Cliente'}
-                    </h2>
-                    <p className="text-sm text-green-600">Online</p>
-                  </div>
+            <div className="bg-green-600 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                  <User className="w-5 h-5 text-white" />
                 </div>
+                <div>
+                  <h2 className="font-semibold">
+                    {activeConversation.contacts?.name || 'Cliente'}
+                  </h2>
+                  <p className="text-sm text-green-100">Online</p>
+                </div>
+              </div>
 
-                {/* Ações do chat */}
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleStatusChange('active')}
-                    title="Reabrir Ticket"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title="Agendamento"
-                  >
-                    <Calendar className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleStatusChange('pending')}
-                    title="Mover p/ Pendente"
-                  >
-                    <Clock className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleStatusChange('resolved')}
-                    title="Resolver Conversa"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title="Transferir Conversa"
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </div>
+              {/* Ações do chat */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  title="Reabrir Ticket"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  title="Agendamento"
+                >
+                  <Calendar className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  title="Mover p/ Pendente"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  title="Resolver Conversa"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  title="Transferir Conversa"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
               </div>
             </div>
 
             {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-100">
               {messages.filter(m => !m.internal_message).map((message) => (
                 <div
                   key={message.id}
@@ -341,15 +318,15 @@ export default function Atendimentos() {
                 >
                   <div
                     className={cn(
-                      "max-w-xs lg:max-w-md px-4 py-2 rounded-lg",
+                      "max-w-xs lg:max-w-md px-4 py-2 rounded-lg shadow-sm",
                       message.sender_is_user
-                        ? "bg-green-500 text-white"
-                        : "bg-white border border-gray-200"
+                        ? "bg-green-500 text-white rounded-br-none"
+                        : "bg-white text-gray-900 rounded-bl-none"
                     )}
                   >
                     <p className="text-sm">{message.content}</p>
                     <p className={cn(
-                      "text-xs mt-1",
+                      "text-xs mt-1 text-right",
                       message.sender_is_user ? "text-green-100" : "text-gray-500"
                     )}>
                       {new Date(message.created_at).toLocaleTimeString('pt-BR', {
@@ -364,11 +341,11 @@ export default function Atendimentos() {
 
             {/* Input de mensagem */}
             <div className="bg-white border-t p-4">
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2">
+                <Button variant="ghost" size="sm" className="p-2">
                   <Smile className="w-5 h-5 text-gray-500" />
                 </Button>
-                <Button variant="ghost" size="sm">
+                <Button variant="ghost" size="sm" className="p-2">
                   <Paperclip className="w-5 h-5 text-gray-500" />
                 </Button>
                 <input
@@ -376,7 +353,7 @@ export default function Atendimentos() {
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
                   placeholder="Digite uma mensagem..."
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 bg-transparent px-2 py-1 focus:outline-none"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -387,7 +364,8 @@ export default function Atendimentos() {
                 <Button
                   onClick={handleSendMessage}
                   disabled={!messageText.trim()}
-                  className="bg-green-500 hover:bg-green-600"
+                  size="sm"
+                  className="bg-green-500 hover:bg-green-600 rounded-full p-2"
                 >
                   <Send className="w-4 h-4" />
                 </Button>
@@ -395,9 +373,11 @@ export default function Atendimentos() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center bg-gray-100">
             <div className="text-center">
-              <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <div className="w-24 h-24 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center">
+                <User className="w-12 h-12 text-gray-500" />
+              </div>
               <h3 className="text-lg font-medium text-gray-900 mb-2">
                 Selecione uma conversa
               </h3>
@@ -418,15 +398,15 @@ export default function Atendimentos() {
               <User className="w-10 h-10 text-gray-600" />
             </div>
             <h3 className="font-semibold text-gray-900 text-lg">
-              {activeConversation.contacts?.name || 'Cliente'}
+              {activeConversation.contacts?.name || 'Maria Souza'}
             </h3>
             <p className="text-gray-600 flex items-center justify-center gap-1 mt-1">
               <Phone className="w-4 h-4" />
-              {activeConversation.contacts?.phone_number}
+              {activeConversation.contacts?.phone_number || '+55 11 98765-4321'}
             </p>
             
             <div className="flex justify-center gap-2 mt-3">
-              <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">
+              <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
                 VIP
               </span>
               <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
@@ -454,14 +434,14 @@ export default function Atendimentos() {
                   value={internalNote}
                   onChange={(e) => setInternalNote(e.target.value)}
                   placeholder="Adicione uma nota sobre o cliente..."
-                  className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
                   rows={3}
                 />
                 <Button
                   onClick={handleAddInternalNote}
                   disabled={!internalNote.trim()}
                   size="sm"
-                  className="w-full"
+                  className="w-full bg-green-500 hover:bg-green-600"
                 >
                   Adicionar Nota
                 </Button>
@@ -483,17 +463,17 @@ export default function Atendimentos() {
 
           {/* Ações do cliente */}
           <div className="p-4 space-y-3">
-            <Button variant="outline" className="w-full justify-start">
+            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
               <UserPlus className="w-4 h-4 mr-2" />
               Anexar cliente a uma carteira
             </Button>
             
-            <Button variant="outline" className="w-full justify-start">
+            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
               <FileText className="w-4 h-4 mr-2" />
               Criar protocolo manual
             </Button>
             
-            <Button variant="outline" className="w-full justify-start">
+            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
               <Star className="w-4 h-4 mr-2" />
               Enviar avaliação de atendimento
             </Button>
