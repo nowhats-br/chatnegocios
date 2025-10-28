@@ -172,6 +172,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
   };
 
   const renderMessageContent = (msg: Message) => {
+    // Mensagem interna do admin
+    if (msg.message_type === 'internal') {
+      return (
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-medium text-orange-800 bg-orange-200 px-2 py-1 rounded">
+              💬 Mensagem do Admin
+            </span>
+          </div>
+          <p className="text-orange-900 whitespace-pre-wrap">{msg.content}</p>
+          <p className="text-xs text-orange-600 mt-1">
+            Esta mensagem é privada - o cliente não pode ver
+          </p>
+        </div>
+      );
+    }
+
     switch (msg.message_type) {
       case 'image':
         return (
@@ -273,16 +290,30 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversation, onSendMessage, on
         {loading ? (
             <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
         ) : (
-            messages.map(msg => (
-                <div key={msg.id} className={`flex ${msg.sender_is_user ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`rounded-lg p-3 max-w-lg shadow-sm ${msg.sender_is_user ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>
+            messages.map(msg => {
+                // Mensagens internas têm layout especial
+                if (msg.message_type === 'internal') {
+                  return (
+                    <div key={msg.id} className="flex justify-center my-4">
+                      <div className="max-w-lg w-full">
                         {renderMessageContent(msg)}
-                        <p className={`text-xs text-right mt-1 ${msg.sender_is_user ? 'text-gray-300 dark:text-gray-400' : 'text-muted-foreground'}`}>
-                            {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                        </p>
+                      </div>
                     </div>
-                </div>
-            ))
+                  );
+                }
+
+                // Mensagens normais
+                return (
+                  <div key={msg.id} className={`flex ${msg.sender_is_user ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`rounded-lg p-3 max-w-lg shadow-sm ${msg.sender_is_user ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>
+                          {renderMessageContent(msg)}
+                          <p className={`text-xs text-right mt-1 ${msg.sender_is_user ? 'text-gray-300 dark:text-gray-400' : 'text-muted-foreground'}`}>
+                              {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                      </div>
+                  </div>
+                );
+            })
         )}
         <div ref={messagesEndRef} />
       </div>

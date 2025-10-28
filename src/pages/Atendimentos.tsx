@@ -1,0 +1,513 @@
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
+import { Conversation, ConversationStatus, Message } from '@/types/database';
+import { dbClient } from '@/lib/dbClient';
+import { useAuth } from '@/contexts/AuthContext';
+import { 
+  Search,
+  RotateCcw,
+  Calendar,
+  Clock,
+  CheckCircle,
+  ArrowRight,
+  User,
+  Phone,
+  Star,
+  UserPlus,
+  FileText,
+  MessageSquare,
+  ChevronDown,
+  Send,
+  Paperclip,
+  Smile
+} from 'lucide-react';
+import Button from '@/components/ui/Button';
+import { cn } from '@/lib/utils';
+
+interface ConversationWithDetails extends Conversation {
+  lastMessage?: Message;
+  unreadCount?: number;
+}
+
+export default function Atendimentos() {
+  const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
+  const [activeConversation, setActiveConversation] = useState<ConversationWithDetails | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [messageText, setMessageText] = useState('');
+  const [internalNote, setInternalNote] = useState('');
+  const [showInternalNotes, setShowInternalNotes] = useState(false);
+  const { user } = useAuth();
+
+  const fetchConversations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await dbClient.conversations.listWithContact();
+      
+      // Buscar última mensagem para cada conversa
+      const conversationsWithDetails = await Promise.all(
+        data.map(async (conv) => {
+          try {
+            const messages = await dbClient.messages.listByConversation(conv.id);
+            const lastMessage = messages[messages.length - 1];
+            const unreadCount = messages.filter(m => !m.sender_is_user && !m.internal_message).length;
+            
+            return {
+              ...conv,
+              lastMessage: lastMessage || undefined,
+              unreadCount
+            };
+          } catch {
+            return { ...conv, unreadCount: 0 };
+          }
+        })
+      );
+      
+      setConversations(conversationsWithDetails);
+    } catch (error: any) {
+      toast.error('Erro ao buscar conversas', { description: error.message });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    try {
+      const data = await dbClient.messages.listByConversation(conversationId);
+      setMessages(data);
+    } catch (error: any) {
+      toast.error('Erro ao buscar mensagens', { description: error.message });
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+
+  useEffect(() => {
+    if (activeConversation) {
+      fetchMessages(activeConversation.id);
+    }
+  }, [activeConversation, fetchMessages]);
+
+  const handleSelectConversation = (conversation: ConversationWithDetails) => {
+    setActiveConversation(conversation);
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageText.trim() || !activeConversation || !user) return;
+
+    try {
+      await dbClient.messages.create({
+        conversation_id: activeConversation.id,
+        content: messageText,
+        sender_is_user: true,
+        message_type: 'text',
+      });
+
+      setMessageText('');
+      fetchMessages(activeConversation.id);
+    } catch (error: any) {
+      toast.error('Erro ao enviar mensagem', { description: error.message });
+    }
+  };
+
+  const handleAddInternalNote = async () => {
+    if (!internalNote.trim() || !activeConversation || !user) return;
+
+    try {
+      await dbClient.messages.create({
+        conversation_id: activeConversation.id,
+        content: internalNote,
+        sender_is_user: true,
+        message_type: 'internal',
+      });
+
+      setInternalNote('');
+      toast.success('Nota interna adicionada!');
+      fetchMessages(activeConversation.id);
+    } catch (error: any) {
+      toast.error('Erro ao adicionar nota', { description: error.message });
+    }
+  };
+
+  const handleStatusChange = async (newStatus: ConversationStatus) => {
+    if (!activeConversation) return;
+
+    try {
+      await dbClient.conversations.update(activeConversation.id, { status: newStatus });
+      setActiveConversation({ ...activeConversation, status: newStatus });
+      fetchConversations();
+      toast.success(`Conversa ${newStatus === 'resolved' ? 'resolvida' : 'atualizada'}!`);
+    } catch (error: any) {
+      toast.error('Erro ao atualizar status', { description: error.message });
+    }
+  };
+
+  const filteredConversations = conversations
+    .filter(c => c.status === activeFilter)
+    .filter(c => {
+      if (!searchTerm) return true;
+      const contactName = c.contacts?.name?.toLowerCase() || '';
+      const contactPhone = c.contacts?.phone_number || '';
+      const search = searchTerm.toLowerCase();
+      return contactName.includes(search) || contactPhone.includes(search);
+    })
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+  const getStatusLabel = (status: ConversationStatus) => {
+    switch (status) {
+      case 'pending': return 'Aguardando';
+      case 'active': return 'Ativos';
+      case 'resolved': return 'Finalizados';
+      default: return status;
+    }
+  };
+
+  const getStatusCount = (status: ConversationStatus) => {
+    return conversations.filter(c => c.status === status).length;
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      {/* Sidebar esquerda */}
+      <div className="w-80 bg-white border-r flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b">
+          <h1 className="text-lg font-semibold text-gray-900">Caixa de Entrada</h1>
+          
+          {/* Busca */}
+          <div className="mt-3 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nome ou número"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        {/* Filtros */}
+        <div className="flex border-b">
+          {(['active', 'pending', 'resolved'] as ConversationStatus[]).map((status) => (
+            <button
+              key={status}
+              onClick={() => setActiveFilter(status)}
+              className={cn(
+                "flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors",
+                activeFilter === status
+                  ? "border-blue-500 text-blue-600 bg-blue-50"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              )}
+            >
+              {getStatusLabel(status)}
+              <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">
+                {getStatusCount(status)}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Lista de conversas */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center items-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              Nenhuma conversa encontrada
+            </div>
+          ) : (
+            filteredConversations.map((conversation) => (
+              <div
+                key={conversation.id}
+                onClick={() => handleSelectConversation(conversation)}
+                className={cn(
+                  "p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors",
+                  activeConversation?.id === conversation.id && "bg-blue-50 border-r-2 border-r-blue-500"
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-gray-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium text-gray-900 truncate">
+                        {conversation.contacts?.name || conversation.contacts?.phone_number || 'Desconhecido'}
+                      </h3>
+                      <span className="text-xs text-gray-500">
+                        {new Date(conversation.updated_at).toLocaleTimeString('pt-BR', { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 truncate mt-1">
+                      {conversation.lastMessage?.content || 'Nenhuma mensagem'}
+                    </p>
+                    {conversation.unreadCount && conversation.unreadCount > 0 && (
+                      <div className="mt-2">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          {conversation.unreadCount} nova{conversation.unreadCount > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Área central do chat */}
+      <div className="flex-1 flex flex-col">
+        {activeConversation ? (
+          <>
+            {/* Header do chat */}
+            <div className="bg-white border-b p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center">
+                    <User className="w-5 h-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-gray-900">
+                      {activeConversation.contacts?.name || 'Cliente'}
+                    </h2>
+                    <p className="text-sm text-green-600">Online</p>
+                  </div>
+                </div>
+
+                {/* Ações do chat */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleStatusChange('active')}
+                    title="Reabrir Ticket"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title="Agendamento"
+                  >
+                    <Calendar className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleStatusChange('pending')}
+                    title="Mover p/ Pendente"
+                  >
+                    <Clock className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleStatusChange('resolved')}
+                    title="Resolver Conversa"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title="Transferir Conversa"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Mensagens */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.filter(m => !m.internal_message).map((message) => (
+                <div
+                  key={message.id}
+                  className={cn(
+                    "flex",
+                    message.sender_is_user ? "justify-end" : "justify-start"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "max-w-xs lg:max-w-md px-4 py-2 rounded-lg",
+                      message.sender_is_user
+                        ? "bg-green-500 text-white"
+                        : "bg-white border border-gray-200"
+                    )}
+                  >
+                    <p className="text-sm">{message.content}</p>
+                    <p className={cn(
+                      "text-xs mt-1",
+                      message.sender_is_user ? "text-green-100" : "text-gray-500"
+                    )}>
+                      {new Date(message.created_at).toLocaleTimeString('pt-BR', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Input de mensagem */}
+            <div className="bg-white border-t p-4">
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm">
+                  <Smile className="w-5 h-5 text-gray-500" />
+                </Button>
+                <Button variant="ghost" size="sm">
+                  <Paperclip className="w-5 h-5 text-gray-500" />
+                </Button>
+                <input
+                  type="text"
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder="Digite uma mensagem..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                />
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!messageText.trim()}
+                  className="bg-green-500 hover:bg-green-600"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Selecione uma conversa
+              </h3>
+              <p className="text-gray-500">
+                Escolha uma conversa da lista para começar a atender
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Painel direito - Perfil do cliente */}
+      {activeConversation && (
+        <div className="w-80 bg-white border-l flex flex-col">
+          {/* Perfil */}
+          <div className="p-6 border-b text-center">
+            <div className="w-20 h-20 rounded-full bg-gray-300 mx-auto mb-4 flex items-center justify-center">
+              <User className="w-10 h-10 text-gray-600" />
+            </div>
+            <h3 className="font-semibold text-gray-900 text-lg">
+              {activeConversation.contacts?.name || 'Cliente'}
+            </h3>
+            <p className="text-gray-600 flex items-center justify-center gap-1 mt-1">
+              <Phone className="w-4 h-4" />
+              {activeConversation.contacts?.phone_number}
+            </p>
+            
+            <div className="flex justify-center gap-2 mt-3">
+              <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">
+                VIP
+              </span>
+              <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                Cliente Novo
+              </span>
+            </div>
+          </div>
+
+          {/* Notas Internas */}
+          <div className="p-4 border-b">
+            <button
+              onClick={() => setShowInternalNotes(!showInternalNotes)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <span className="font-medium text-gray-900">Notas Internas</span>
+              <ChevronDown className={cn(
+                "w-4 h-4 transition-transform",
+                showInternalNotes && "rotate-180"
+              )} />
+            </button>
+            
+            {showInternalNotes && (
+              <div className="mt-3 space-y-3">
+                <textarea
+                  value={internalNote}
+                  onChange={(e) => setInternalNote(e.target.value)}
+                  placeholder="Adicione uma nota sobre o cliente..."
+                  className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                />
+                <Button
+                  onClick={handleAddInternalNote}
+                  disabled={!internalNote.trim()}
+                  size="sm"
+                  className="w-full"
+                >
+                  Adicionar Nota
+                </Button>
+                
+                {/* Notas existentes */}
+                <div className="space-y-2">
+                  {messages.filter(m => m.internal_message).map((note) => (
+                    <div key={note.id} className="p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                      <p className="text-gray-700">{note.content}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {new Date(note.created_at).toLocaleString('pt-BR')}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Ações do cliente */}
+          <div className="p-4 space-y-3">
+            <Button variant="outline" className="w-full justify-start">
+              <UserPlus className="w-4 h-4 mr-2" />
+              Anexar cliente a uma carteira
+            </Button>
+            
+            <Button variant="outline" className="w-full justify-start">
+              <FileText className="w-4 h-4 mr-2" />
+              Criar protocolo manual
+            </Button>
+            
+            <Button variant="outline" className="w-full justify-start">
+              <Star className="w-4 h-4 mr-2" />
+              Enviar avaliação de atendimento
+            </Button>
+          </div>
+
+          {/* Histórico */}
+          <div className="p-4 border-t">
+            <button className="flex items-center justify-between w-full text-left">
+              <span className="font-medium text-gray-900">Histórico de Atendimentos</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

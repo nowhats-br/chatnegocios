@@ -57,6 +57,11 @@ export const API_ENDPOINTS = {
    * Endpoint to set instance settings (v1 Settings Set).
    */
   SETTINGS_SET: (instanceName: string) => `/settings/set/${instanceName}`,
+
+  /**
+   * Endpoint to fetch chats from an instance.
+   */
+  CHAT_FIND: (instanceName: string) => `/chat/findChats/${instanceName}`,
 };
 
 /**

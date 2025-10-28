@@ -3,6 +3,7 @@ import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import Connections from './pages/Connections';
 import AtendimentoRealtime from './pages/AtendimentoRealtime';
+import Atendimentos from './pages/Atendimentos';
 import Kanban from './pages/Kanban';
 import Settings from './pages/Settings';
 import Registrations from './pages/Registrations';
@@ -38,6 +39,7 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/conexoes" element={<Connections />} />
               <Route path="/chat" element={<AtendimentoRealtime />} />
+              <Route path="/atendimentos" element={<Atendimentos />} />
               <Route path="/kanban" element={<Kanban />} />
               <Route path="/cadastros" element={<Registrations />} />
               <Route path="/configuracoes" element={<Settings />} />

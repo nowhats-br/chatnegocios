@@ -176,18 +176,36 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     }
 
     if (eventType === 'connection.update') {
+      // Verificar status atual antes de atualizar
+      const { data: currentConnection } = await supabaseAdmin
+        .from('connections')
+        .select('status')
+        .eq('instance_name', instanceName)
+        .eq('user_id', ownerUserId)
+        .single();
+
+      // Se a conexão está pausada, não atualizar o status
+      if (currentConnection?.status === 'PAUSED') {
+        console.log(`[Webhook] Conexão '${instanceName}' está pausada, ignorando atualização de status`);
+        return res.status(200).json({ ok: true, message: 'Status ignorado - conexão pausada' });
+      }
+
       const statusMap = {
         'open': 'CONNECTED',
         'close': 'DISCONNECTED',
         'connecting': 'INITIALIZING',
       };
       const newStatus = statusMap[payload.data?.state] || 'DISCONNECTED';
-      const { error } = await supabaseAdmin
-        .from('connections')
-        .update({ status: newStatus, instance_data: payload.data })
-        .eq('instance_name', instanceName)
-        .eq('user_id', ownerUserId);
-      if (error) console.error(`[Webhook] Erro ao atualizar status da conexão '${instanceName}':`, error.message);
+      
+      // Só atualizar se o status realmente mudou
+      if (currentConnection?.status !== newStatus) {
+        const { error } = await supabaseAdmin
+          .from('connections')
+          .update({ status: newStatus, instance_data: payload.data })
+          .eq('instance_name', instanceName)
+          .eq('user_id', ownerUserId);
+        if (error) console.error(`[Webhook] Erro ao atualizar status da conexão '${instanceName}':`, error.message);
+      }
     }
 
     else if (eventType === 'qrcode.updated') {

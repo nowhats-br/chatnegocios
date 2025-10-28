@@ -95,7 +95,19 @@ export const dbClient = {
   },
   messages: {
     async listByConversation(conversationId: string): Promise<Message[]> {
-      const { data, error } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          sender_profile:profiles!messages_internal_sender_id_fkey (
+            id,
+            name,
+            email,
+            role
+          )
+        `)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
       if (error) throw error;
       return data as Message[];
     },

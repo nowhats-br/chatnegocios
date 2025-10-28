@@ -8,7 +8,8 @@ export type Json =
 
 export type ConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'WAITING_QR_CODE' | 'INITIALIZING' | 'PAUSED';
 export type ConversationStatus = 'new' | 'active' | 'pending' | 'resolved';
-export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'product';
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'product' | 'internal';
+export type UserRole = 'admin' | 'agent' | 'user';
 
 export interface Connection {
   id: string;
@@ -111,4 +112,17 @@ export interface Message {
     message_type: MessageType;
     created_at: string;
     user_id: string;
+    internal_message?: boolean; // Para mensagens internas entre admin e atendente
+    internal_sender_id?: string; // ID do remetente da mensagem interna
+}
+
+export interface Profile {
+    id: string;
+    email: string;
+    name: string | null;
+    role: UserRole;
+    avatar_url: string | null;
+    created_at: string;
+    evolution_api_url: string | null;
+    evolution_api_key: string | null;
 }

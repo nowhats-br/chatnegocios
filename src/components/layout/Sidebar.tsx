@@ -14,16 +14,19 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/conexoes', icon: PlugZap, label: 'Conexões' },
-  { to: '/chat', icon: MessageSquare, label: 'Atendimento' },
+  { to: '/chat', icon: MessageSquare, label: 'Chat Realtime' },
+  { to: '/atendimentos', icon: MessageSquare, label: 'Atendimentos' },
   { to: '/kanban', icon: KanbanSquare, label: 'Kanban' },
   { to: '/cadastros', icon: Users, label: 'Cadastros' },
 ];
 
 const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+
 
   return (
     <motion.div

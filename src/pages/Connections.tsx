@@ -45,6 +45,7 @@ export default function Connections() {
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [connectionCheckInterval, setConnectionCheckInterval] = useState<NodeJS.Timeout | null>(null);
+  const [connectedInstances, setConnectedInstances] = useState<Set<string>>(new Set());
   
   const { user } = useAuth();
   const { request: evolutionApiRequest } = useEvolutionApi(); 
@@ -106,7 +107,15 @@ export default function Connections() {
           setConnectionCheckInterval(null);
         }
         
-        toast.success('WhatsApp conectado com sucesso!');
+        // Mostrar mensagem apenas uma vez por instância
+        if (!connectedInstances.has(connection.id)) {
+          setConnectedInstances(prev => new Set(prev).add(connection.id));
+          toast.success('WhatsApp conectado com sucesso!');
+          
+          // Sincronizar últimas conversas
+          syncLastConversations(connection);
+        }
+        
         return true;
       }
       return false;
@@ -185,6 +194,13 @@ const handleDisconnect = async (connection: Connection) => {
         c.id === connection.id ? { ...c, status: 'DISCONNECTED' } : c
       ));
       
+      // Remover da lista de instâncias conectadas
+      setConnectedInstances(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(connection.id);
+        return newSet;
+      });
+      
       toast.success('WhatsApp desconectado com sucesso.');
       
     } catch (error: any) {
@@ -199,10 +215,30 @@ const handleDisconnect = async (connection: Connection) => {
 
   const handlePause = async (connection: Connection) => {
     try {
+      // Primeiro pausar no banco local
       await dbClient.connections.update(connection.id, { status: 'PAUSED' });
       setConnections(prev => prev.map(c => 
         c.id === connection.id ? { ...c, status: 'PAUSED' } : c
       ));
+      
+      // Tentar pausar na API Evolution (se suportado)
+      try {
+        await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
+          method: 'POST',
+          suppressToast: true,
+        });
+      } catch (apiError) {
+        console.warn('API Evolution não suporta pause ou erro:', apiError);
+        // Não é crítico se a API não suportar pause
+      }
+      
+      // Remover da lista de instâncias conectadas
+      setConnectedInstances(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(connection.id);
+        return newSet;
+      });
+      
       toast.success('Conexão pausada com sucesso.');
     } catch (error: any) {
       toast.error('Erro ao pausar conexão', { description: error.message });
@@ -211,15 +247,180 @@ const handleDisconnect = async (connection: Connection) => {
 
   const handleResume = async (connection: Connection) => {
     try {
-      await dbClient.connections.update(connection.id, { status: 'CONNECTED' });
-      setConnections(prev => prev.map(c => 
-        c.id === connection.id ? { ...c, status: 'CONNECTED' } : c
-      ));
-      toast.success('Conexão retomada com sucesso.');
+      // Verificar se a instância ainda está conectada na API Evolution
+      const statusResponse = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name), {
+        method: 'GET',
+        suppressToast: true,
+      });
+
+      if (statusResponse?.instance?.state === 'open') {
+        // Se ainda está conectada, apenas atualizar status
+        await dbClient.connections.update(connection.id, { status: 'CONNECTED' });
+        setConnections(prev => prev.map(c => 
+          c.id === connection.id ? { ...c, status: 'CONNECTED' } : c
+        ));
+        toast.success('Conexão retomada com sucesso.');
+      } else {
+        // Se desconectou, precisa reconectar
+        await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+        setConnections(prev => prev.map(c => 
+          c.id === connection.id ? { ...c, status: 'DISCONNECTED' } : c
+        ));
+        toast.warning('Conexão foi perdida. Clique em "Conectar" para reconectar.');
+      }
     } catch (error: any) {
       toast.error('Erro ao retomar conexão', { description: error.message });
+      // Em caso de erro, marcar como desconectado
+      await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
+      setConnections(prev => prev.map(c => 
+        c.id === connection.id ? { ...c, status: 'DISCONNECTED' } : c
+      ));
     }
   }; 
+  const syncLastConversations = async (connection: Connection) => {
+    try {
+      toast.loading('Sincronizando conversas do WhatsApp...', { id: 'sync-chats' });
+      
+      // Tentar diferentes endpoints para buscar chats
+      const endpoints = [
+        API_ENDPOINTS.CHAT_FIND(connection.instance_name),
+        `/chat/find/${connection.instance_name}`,
+        `/chat/fetchChats/${connection.instance_name}`,
+        `/message/findChats/${connection.instance_name}`,
+      ];
+
+      let chatsResponse = null;
+      
+      for (const endpoint of endpoints) {
+        try {
+          chatsResponse = await evolutionApiRequest<any>(endpoint, {
+            method: 'GET',
+            suppressToast: true,
+          });
+          
+          if (chatsResponse && (Array.isArray(chatsResponse) || Array.isArray(chatsResponse.data))) {
+            console.log(`✅ Chats encontrados usando endpoint: ${endpoint}`);
+            break;
+          }
+        } catch (error) {
+          console.warn(`❌ Endpoint ${endpoint} falhou:`, error);
+          continue;
+        }
+      }
+
+      // Normalizar resposta (alguns endpoints retornam { data: [...] })
+      const chats = Array.isArray(chatsResponse) ? chatsResponse : chatsResponse?.data;
+
+      if (chats && Array.isArray(chats)) {
+        let syncedCount = 0;
+        
+        // Processar últimas 20 conversas
+        const recentChats = chats.slice(0, 20);
+        
+        for (const chat of recentChats) {
+          try {
+            // Extrair número do telefone
+            const remoteJid = chat.id;
+            if (!remoteJid || remoteJid.endsWith('@g.us')) continue; // Pular grupos
+            
+            const phone = remoteJid.split('@')[0];
+            const contactName = chat.name || chat.pushName || phone;
+            
+            if (!phone) continue;
+
+            // Criar/atualizar contato
+            const { data: contact } = await supabase
+              .from('contacts')
+              .upsert({ 
+                user_id: user?.id, 
+                phone_number: phone, 
+                name: contactName 
+              }, { 
+                onConflict: 'user_id, phone_number' 
+              })
+              .select('id')
+              .single();
+
+            if (contact) {
+              // Criar conversa como pendente
+              const { data: conversation } = await supabase
+                .from('conversations')
+                .upsert({ 
+                  user_id: user?.id, 
+                  contact_id: contact.id, 
+                  connection_id: connection.id,
+                  status: 'pending' 
+                }, { 
+                  onConflict: 'user_id, contact_id' 
+                })
+                .select('id')
+                .single();
+
+              if (conversation) {
+                // Tentar buscar mensagens recentes desta conversa
+                try {
+                  const messagesResponse = await evolutionApiRequest<any>(`/chat/findMessages/${connection.instance_name}`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      where: {
+                        key: {
+                          remoteJid: remoteJid
+                        }
+                      },
+                      limit: 5 // Últimas 5 mensagens
+                    }),
+                    suppressToast: true,
+                  });
+
+                  if (messagesResponse && Array.isArray(messagesResponse)) {
+                    for (const msg of messagesResponse.reverse()) { // Ordem cronológica
+                      try {
+                        const messageContent = msg.message?.conversation || 
+                                             msg.message?.extendedTextMessage?.text || 
+                                             'Mensagem não suportada';
+                        
+                        await supabase.from('messages').insert({
+                          id: msg.key?.id || crypto.randomUUID(),
+                          conversation_id: conversation.id,
+                          user_id: user?.id,
+                          sender_is_user: msg.key?.fromMe || false,
+                          content: messageContent,
+                          message_type: 'text',
+                          created_at: new Date(msg.messageTimestamp * 1000).toISOString()
+                        });
+                      } catch (msgError) {
+                        console.warn('Erro ao inserir mensagem:', msgError);
+                      }
+                    }
+                  }
+                } catch (msgError) {
+                  console.warn('Erro ao buscar mensagens:', msgError);
+                }
+                
+                syncedCount++;
+              }
+            }
+          } catch (error) {
+            console.warn('Erro ao processar chat:', error);
+          }
+        }
+        
+        toast.success(`${syncedCount} conversas sincronizadas!`, { id: 'sync-chats' });
+        
+        // Atualizar lista de conversas
+        fetchConnections();
+      } else {
+        toast.warning('Nenhuma conversa encontrada para sincronizar', { id: 'sync-chats' });
+      }
+    } catch (error: any) {
+      console.error('Erro ao sincronizar conversas:', error);
+      toast.error('Erro ao sincronizar conversas', { 
+        description: error.message,
+        id: 'sync-chats' 
+      });
+    }
+  };
+
  const confirmDelete = async () => {
     if (!selectedConnection) return;
     setIsDeleting(true);
@@ -431,6 +632,16 @@ const handleDisconnect = async (connection: Connection) => {
 
             {status === 'CONNECTED' && (
               <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => syncLastConversations(connection)}
+                  className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300"
+                  title="Sincronizar conversas do WhatsApp"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Sync
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
