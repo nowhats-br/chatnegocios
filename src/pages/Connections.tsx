@@ -51,11 +51,22 @@ export default function Connections() {
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('public:connections')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'connections', filter: `user_id=eq.${user.id}` },
-        () => {
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'connections', 
+        filter: `user_id=eq.${user.id}` 
+      }, (payload: any) => {
+        console.log('Mudança na tabela connections:', payload);
+        // Só atualizar se não for uma mudança de status para PAUSED
+        if (payload.new && payload.new.status !== 'PAUSED') {
           fetchConnections();
+        } else if (payload.eventType === 'DELETE') {
+          // Remover da lista local quando deletado
+          setConnections(prev => prev.filter(c => c.id !== payload.old.id));
         }
-      ).subscribe();
+      })
+      .subscribe();
     
     return () => {
       supabase.removeChannel(channel);
@@ -73,6 +84,13 @@ export default function Connections() {
       });
 
       if (statusResponse?.instance?.state === 'open') {
+        // Verificar se a conexão não está pausada antes de atualizar
+        const currentConnection = connections.find(c => c.id === connection.id);
+        if (currentConnection?.status === 'PAUSED') {
+          console.log('Conexão pausada, não atualizando status');
+          return false;
+        }
+
         await dbClient.connections.update(connection.id, { status: 'CONNECTED' });
         setConnections(prev => prev.map(c => 
           c.id === connection.id ? { ...c, status: 'CONNECTED' } : c
@@ -86,10 +104,26 @@ export default function Connections() {
           setConnectionCheckInterval(null);
         }
         
+        // Mostrar toast apenas uma vez por sessão
         if (!connectedInstances.has(connection.id)) {
           setConnectedInstances(prev => new Set(prev).add(connection.id));
           toast.success('WhatsApp conectado com sucesso!');
-          syncLastConversations(connection);
+          
+          // Configurar webhook automaticamente após conexão
+          try {
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+            await fetch(`${backendUrl}/api/whatsapp/setup-webhook/${connection.instance_name}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': user?.id || '',
+              },
+              body: JSON.stringify({ userId: user?.id })
+            });
+            console.log('Webhook configurado automaticamente');
+          } catch (webhookError) {
+            console.warn('Erro ao configurar webhook:', webhookError);
+          }
         }
         
         return true;
@@ -189,25 +223,24 @@ export default function Connections() {
 
   const handlePause = async (connection: Connection) => {
     try {
+      // Primeiro pausar no banco local
       await dbClient.connections.update(connection.id, { status: 'PAUSED' });
       setConnections(prev => prev.map(c => 
         c.id === connection.id ? { ...c, status: 'PAUSED' } : c
       ));
       
-      try {
-        await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_PAUSE(connection.instance_name), {
-          method: 'POST',
-          suppressToast: true,
-        });
-      } catch (apiError) {
-        console.warn('API Evolution não suporta pause ou erro:', apiError);
-      }
-      
+      // Remover da lista de instâncias conectadas para evitar reconexão automática
       setConnectedInstances(prev => {
         const newSet = new Set(prev);
         newSet.delete(connection.id);
         return newSet;
       });
+      
+      // Limpar qualquer intervalo de verificação ativo
+      if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval);
+        setConnectionCheckInterval(null);
+      }
       
       toast.success('Conexão pausada com sucesso.');
     } catch (error: any) {
@@ -248,10 +281,10 @@ export default function Connections() {
     try {
       toast.loading('Sincronizando conversas do WhatsApp...', { id: 'sync-chats' });
       
+      // Tentar diferentes endpoints para buscar chats
       const endpoints = [
-        API_ENDPOINTS.CHAT_FIND(connection.instance_name),
+        `/chat/findChats/${connection.instance_name}`,
         `/chat/find/${connection.instance_name}`,
-        `/chat/fetchChats/${connection.instance_name}`,
         `/message/findChats/${connection.instance_name}`,
       ];
 
@@ -259,14 +292,20 @@ export default function Connections() {
       
       for (const endpoint of endpoints) {
         try {
-          chatsResponse = await evolutionApiRequest<any>(endpoint, {
+          const fullEndpoint = `/api/evolution${endpoint}`;
+          const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || window.location.origin}${fullEndpoint}`, {
             method: 'GET',
-            suppressToast: true,
+            headers: {
+              'Content-Type': 'application/json',
+            },
           });
-          
-          if (chatsResponse && (Array.isArray(chatsResponse) || Array.isArray(chatsResponse.data))) {
-            console.log(`✅ Chats encontrados usando endpoint: ${endpoint}`);
-            break;
+
+          if (response.ok) {
+            chatsResponse = await response.json();
+            if (chatsResponse && (Array.isArray(chatsResponse) || Array.isArray(chatsResponse.data))) {
+              console.log(`✅ Chats encontrados usando endpoint: ${fullEndpoint}`);
+              break;
+            }
           }
         } catch (error) {
           console.warn(`❌ Endpoint ${endpoint} falhou:`, error);
@@ -283,13 +322,14 @@ export default function Connections() {
         for (const chat of recentChats) {
           try {
             const remoteJid = chat.id;
-            if (!remoteJid || remoteJid.endsWith('@g.us')) continue;
+            if (!remoteJid || remoteJid.endsWith('@g.us')) continue; // Pular grupos
             
             const phone = remoteJid.split('@')[0];
             const contactName = chat.name || chat.pushName || phone;
             
             if (!phone) continue;
 
+            // Criar/atualizar contato
             const { data: contact } = await supabase
               .from('contacts')
               .upsert({ 
@@ -303,13 +343,15 @@ export default function Connections() {
               .single();
 
             if (contact) {
+              // Criar/atualizar conversa
               const { data: conversation } = await supabase
                 .from('conversations')
                 .upsert({ 
                   user_id: user?.id, 
                   contact_id: contact.id, 
                   connection_id: connection.id,
-                  status: 'pending' 
+                  status: 'pending',
+                  updated_at: new Date().toISOString()
                 }, { 
                   onConflict: 'user_id, contact_id' 
                 })
@@ -326,7 +368,6 @@ export default function Connections() {
         }
         
         toast.success(`${syncedCount} conversas sincronizadas!`, { id: 'sync-chats' });
-        fetchConnections();
       } else {
         toast.warning('Nenhuma conversa encontrada para sincronizar', { id: 'sync-chats' });
       }
@@ -343,12 +384,28 @@ export default function Connections() {
     if (!selectedConnection) return;
     setIsDeleting(true);
     try {
-      await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_DELETE(selectedConnection.instance_name), {
-        method: 'DELETE',
-        suppressToast: true,
-      }).catch(e => console.warn("Falha ao deletar na API Evolution:", e.message));
+      // Tentar deletar na API Evolution primeiro (sem bloquear se falhar)
+      try {
+        await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_DELETE(selectedConnection.instance_name), {
+          method: 'DELETE',
+          suppressToast: true,
+        });
+      } catch (e) {
+        console.warn("Falha ao deletar na API Evolution:", e);
+      }
 
+      // Deletar do banco local
       await dbClient.connections.delete(selectedConnection.id);
+      
+      // Remover da lista local imediatamente
+      setConnections(prev => prev.filter(c => c.id !== selectedConnection.id));
+      
+      // Remover das instâncias conectadas
+      setConnectedInstances(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(selectedConnection.id);
+        return newSet;
+      });
       
       toast.success('Instância excluída com sucesso.');
       setIsDeleteDialogOpen(false);
