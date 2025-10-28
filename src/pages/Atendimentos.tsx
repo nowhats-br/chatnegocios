@@ -24,7 +24,7 @@ import { dbClient } from '@/lib/dbClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import Button from '@/components/ui/Button';
+
 import { cn } from '@/lib/utils';
 
 interface ConversationWithDetails extends Conversation {
@@ -42,7 +42,6 @@ export default function Atendimentos() {
   const [activeConversation, setActiveConversation] = useState<ConversationWithDetails | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
@@ -96,18 +95,7 @@ export default function Atendimentos() {
     }
   }, []);
 
-  // Sincronizar conversas simples
-  const syncConversations = useCallback(async () => {
-    setSyncing(true);
-    try {
-      await fetchConversations();
-      toast.success('Conversas atualizadas!');
-    } catch (error: any) {
-      toast.error('Erro ao sincronizar conversas', { description: error.message });
-    } finally {
-      setSyncing(false);
-    }
-  }, [fetchConversations]);
+
 
   // Inicialização
   useEffect(() => {
@@ -207,6 +195,11 @@ export default function Atendimentos() {
             </button>
           </div>
         </div>
+        <div className="mt-auto flex flex-col gap-2 items-center">
+          <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
+            <User className="w-5 h-5" />
+          </button>
+        </div>
       </aside>
 
       {/* Lista de conversas */}
@@ -269,18 +262,9 @@ export default function Atendimentos() {
             </div>
           ) : filteredConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
-              <p className="text-gray-500 dark:text-gray-400 mb-4">
+              <p className="text-gray-500 dark:text-gray-400">
                 Nenhuma conversa encontrada
               </p>
-              <Button
-                onClick={syncConversations}
-                disabled={syncing}
-                size="sm"
-                className="bg-green-500 hover:bg-green-600"
-              >
-                <RefreshCw className={cn("w-4 h-4 mr-2", syncing && "animate-spin")} />
-                Sincronizar
-              </Button>
             </div>
           ) : (
             filteredConversations.map((conversation) => (

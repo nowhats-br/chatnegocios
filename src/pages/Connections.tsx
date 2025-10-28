@@ -642,29 +642,15 @@ export default function Connections() {
           {/* Primary action buttons */}
           <div className="grid grid-cols-2 gap-3">
             {status === 'DISCONNECTED' && (
-              <>
-                <Button
-                  onClick={() => handleConnect(connection)}
-                  disabled={isLoading}
-                  loading={isLoading}
-                  className="bg-green-500 hover:bg-green-600 text-white border-0 h-10 flex items-center justify-center"
-                >
-                  <QrCode className="w-4 h-4 mr-2" />
-                  Conectar
-                </Button>
-                <Button
-                  onClick={() => {
-                    setSelectedConnection(connection);
-                    setIsQrModalOpen(true);
-                    generateQrCode(connection);
-                  }}
-                  disabled={isLoading}
-                  className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center"
-                >
-                  <QrCode className="w-4 h-4 mr-2" />
-                  Ver QR Code
-                </Button>
-              </>
+              <Button
+                onClick={() => handleConnect(connection)}
+                disabled={isLoading}
+                loading={isLoading}
+                className="bg-green-500 hover:bg-green-600 text-white border-0 h-10 flex items-center justify-center col-span-2"
+              >
+                <QrCode className="w-4 h-4 mr-2" />
+                Conectar
+              </Button>
             )}
 
             {status === 'WAITING_QR_CODE' && (
