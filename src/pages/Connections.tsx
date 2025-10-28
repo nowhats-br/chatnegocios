@@ -17,10 +17,10 @@ import { cn } from '@/lib/utils';
 
 // Status colors mapping
 const STATUS_COLORS = {
-  CONNECTED: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
-  DISCONNECTED: 'bg-slate-500/10 text-slate-700 border-slate-200',
-  INITIALIZING: 'bg-blue-500/10 text-blue-700 border-blue-200',
-  WAITING_QR_CODE: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  CONNECTED: 'bg-green-500/10 text-green-700 border-green-200',
+  DISCONNECTED: 'bg-red-500/10 text-red-700 border-red-200',
+  INITIALIZING: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
+  WAITING_QR_CODE: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
   PAUSED: 'bg-orange-500/10 text-orange-700 border-orange-200',
 } as const;
 
@@ -44,6 +44,7 @@ export default function Connections() {
   const [isCreating, setIsCreating] = useState(false);
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [connectionCheckInterval, setConnectionCheckInterval] = useState<NodeJS.Timeout | null>(null);
   
   const { user } = useAuth();
   const { request: evolutionApiRequest } = useEvolutionApi(); 
@@ -74,8 +75,46 @@ export default function Connections() {
     
     return () => {
       supabase.removeChannel(channel);
+      // Limpar intervalo se existir
+      if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval);
+      }
     };
-  }, [user, fetchConnections]);
+  }, [user, fetchConnections, connectionCheckInterval]);
+
+  const checkConnectionStatus = async (connection: Connection) => {
+    try {
+      const statusResponse = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_STATUS(connection.instance_name), {
+        method: 'GET',
+        suppressToast: true,
+      });
+
+      if (statusResponse?.instance?.state === 'open') {
+        // Conexão estabelecida
+        await dbClient.connections.update(connection.id, { status: 'CONNECTED' });
+        setConnections(prev => prev.map(c => 
+          c.id === connection.id ? { ...c, status: 'CONNECTED' } : c
+        ));
+        
+        // Fechar modal automaticamente
+        setIsQrModalOpen(false);
+        setSelectedConnection(null);
+        
+        // Limpar intervalo
+        if (connectionCheckInterval) {
+          clearInterval(connectionCheckInterval);
+          setConnectionCheckInterval(null);
+        }
+        
+        toast.success('WhatsApp conectado com sucesso!');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn('Erro ao verificar status da conexão:', error);
+      return false;
+    }
+  };
 
   const handleConnect = async (connection: Connection) => {
     setSelectedConnection(connection);
@@ -100,6 +139,21 @@ export default function Connections() {
         setConnections(prev => prev.map(c => 
           c.id === connection.id ? { ...c, status: 'WAITING_QR_CODE' } : c
         ));
+
+        // Iniciar monitoramento da conexão
+        const interval = setInterval(() => {
+          checkConnectionStatus(connection);
+        }, 3000); // Verificar a cada 3 segundos
+        
+        setConnectionCheckInterval(interval);
+        
+        // Limpar intervalo após 5 minutos (timeout)
+        setTimeout(() => {
+          if (interval) {
+            clearInterval(interval);
+            setConnectionCheckInterval(null);
+          }
+        }, 300000); // 5 minutos
       }
 
     } catch (error: any) {
@@ -200,14 +254,7 @@ const handleDisconnect = async (connection: Connection) => {
     setIsCreating(true);
 
     try {
-      const created = await dbClient.connections.create({
-        instance_name: newConnectionName,
-        status: 'DISCONNECTED',
-        instance_data: { created_at: new Date().toISOString() },
-      });
-
-      setConnections(prev => [created, ...prev]);
-      
+      // Primeiro criar na API Evolution
       const webhookUrl = `${window.location.origin}/api/whatsapp/webhook?uid=${encodeURIComponent(user.id)}`;
 
       const createPayload = {
@@ -225,39 +272,36 @@ const handleDisconnect = async (connection: Connection) => {
         ],
       };
 
-      try {
-        const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
-          method: 'POST',
-          body: JSON.stringify(createPayload),
-          suppressToast: true,
-        });
-        
-        if (creationResponse && creationResponse.status !== 'error') { 
-          await dbClient.connections.update(created.id, {
-            instance_data: {
-              ...creationResponse,
-              created_at: new Date().toISOString(),
-              api_created: true
-            }
-          });
-          
-          toast.success(`Instância "${newConnectionName}" criada com sucesso.`);
-        } else {
-          toast.warning(`Instância "${newConnectionName}" criada localmente`, { 
-            description: 'Não foi possível criar na API Evolution. Você pode tentar conectar manualmente.' 
-          });
-        }
-      } catch (apiError: any) {
-        console.warn('Erro ao criar na API Evolution:', apiError.message);
-        toast.warning(`Instância "${newConnectionName}" criada localmente`, { 
-          description: 'Erro na API Evolution. Verifique as configurações e tente conectar manualmente.' 
-        });
+      // Criar na API Evolution primeiro
+      const creationResponse = await evolutionApiRequest<EvolutionInstanceCreateResponse>(API_ENDPOINTS.INSTANCE_CREATE, {
+        method: 'POST',
+        body: JSON.stringify(createPayload),
+        suppressToast: true,
+      });
+
+      if (!creationResponse || creationResponse.status === 'error') {
+        throw new Error('Falha ao criar instância na API Evolution');
       }
 
+      // Agora criar no banco local com status DISCONNECTED
+      const created = await dbClient.connections.create({
+        instance_name: newConnectionName,
+        status: 'DISCONNECTED',
+        instance_data: {
+          ...creationResponse,
+          created_at: new Date().toISOString(),
+          api_created: true
+        },
+      });
+
+      setConnections(prev => [created, ...prev]);
+      toast.success(`Instância "${newConnectionName}" criada com sucesso no manager da API Evolution.`);
+      
       setIsCreateModalOpen(false);
       setNewConnectionName('');
 
     } catch (error: any) {
+      console.error('Erro ao criar instância:', error);
       toast.error('Falha ao criar instância', { description: error.message });
     } finally {
       setIsCreating(false);
@@ -307,10 +351,10 @@ const handleDisconnect = async (connection: Connection) => {
               {/* Status indicator dot */}
               <div className={cn(
                 "absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900",
-                status === 'CONNECTED' && "bg-emerald-500",
-                status === 'DISCONNECTED' && "bg-slate-400",
-                status === 'INITIALIZING' && "bg-blue-500 animate-pulse",
-                status === 'WAITING_QR_CODE' && "bg-amber-500 animate-pulse",
+                status === 'CONNECTED' && "bg-green-500",
+                status === 'DISCONNECTED' && "bg-red-500",
+                status === 'INITIALIZING' && "bg-yellow-500 animate-pulse",
+                status === 'WAITING_QR_CODE' && "bg-yellow-500 animate-pulse",
                 status === 'PAUSED' && "bg-orange-500"
               )} />
             </div>
@@ -344,7 +388,7 @@ const handleDisconnect = async (connection: Connection) => {
                 onClick={() => handleConnect(connection)}
                 disabled={isLoading}
                 loading={isLoading}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 hover:border-emerald-300"
+                className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border-yellow-200 hover:border-yellow-300"
               >
                 <Wifi className="w-4 h-4" />
                 Conectar
@@ -359,7 +403,7 @@ const handleDisconnect = async (connection: Connection) => {
                   setSelectedConnection(connection);
                   setIsQrModalOpen(true);
                 }}
-                className="bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 hover:border-amber-300"
+                className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border-yellow-200 hover:border-yellow-300"
               >
                 <QrCode className="w-4 h-4" />
                 Ver QR
@@ -381,7 +425,7 @@ const handleDisconnect = async (connection: Connection) => {
                   size="sm"
                   variant="outline"
                   onClick={() => handleDisconnect(connection)}
-                  className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 hover:border-red-300"
+                  className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 hover:border-green-300"
                 >
                   <WifiOff className="w-4 h-4" />
                   Desconectar
@@ -394,7 +438,7 @@ const handleDisconnect = async (connection: Connection) => {
                 size="sm"
                 variant="outline"
                 onClick={() => handleResume(connection)}
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300"
+                className="bg-blue-900 hover:bg-blue-800 text-white border-blue-900 hover:border-blue-800"
               >
                 <Play className="w-4 h-4" />
                 Retomar
@@ -411,6 +455,7 @@ const handleDisconnect = async (connection: Connection) => {
               className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 hover:border-red-300"
             >
               <Trash2 className="w-4 h-4" />
+              Excluir
             </Button>
           </div>
         </div>
@@ -514,10 +559,10 @@ const handleDisconnect = async (connection: Connection) => {
                   >
                     <div className={cn(
                       "w-2 h-2 rounded-full",
-                      status === 'CONNECTED' && "bg-emerald-500",
-                      status === 'DISCONNECTED' && "bg-slate-400",
-                      status === 'INITIALIZING' && "bg-blue-500",
-                      status === 'WAITING_QR_CODE' && "bg-amber-500",
+                      status === 'CONNECTED' && "bg-green-500",
+                      status === 'DISCONNECTED' && "bg-red-500",
+                      status === 'INITIALIZING' && "bg-yellow-500",
+                      status === 'WAITING_QR_CODE' && "bg-yellow-500",
                       status === 'PAUSED' && "bg-orange-500"
                     )} />
                     <span>{count}</span>
@@ -581,7 +626,13 @@ const handleDisconnect = async (connection: Connection) => {
         {/* Modal de QR Code */}
         <Modal 
           isOpen={isQrModalOpen} 
-          onClose={() => setIsQrModalOpen(false)} 
+          onClose={() => {
+            setIsQrModalOpen(false);
+            if (connectionCheckInterval) {
+              clearInterval(connectionCheckInterval);
+              setConnectionCheckInterval(null);
+            }
+          }} 
           title={`Conectar ${selectedConnection?.instance_name}`}
           size="md"
         >
@@ -602,6 +653,9 @@ const handleDisconnect = async (connection: Connection) => {
                   <p className="text-sm text-slate-600 dark:text-slate-400">
                     Abra o WhatsApp no seu celular, vá em Dispositivos Vinculados e escaneie este código.
                   </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-500">
+                    O modal fechará automaticamente quando a conexão for estabelecida.
+                  </p>
                 </div>
               </>
             ) : (
@@ -615,7 +669,13 @@ const handleDisconnect = async (connection: Connection) => {
             
             <Button 
               variant="outline" 
-              onClick={() => setIsQrModalOpen(false)}
+              onClick={() => {
+                setIsQrModalOpen(false);
+                if (connectionCheckInterval) {
+                  clearInterval(connectionCheckInterval);
+                  setConnectionCheckInterval(null);
+                }
+              }}
               className="w-full"
             >
               Fechar
