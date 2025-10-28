@@ -124,10 +124,85 @@ app.get('/api/health', (_req, res) => {
     evolutionApiKey: EVOLUTION_API_KEY ? 'configurada' : 'não configurada',
     port: PORT,
     websocket: 'enabled',
-    connectedUsers: connectedUsers.size
+    connectedUsers: connectedUsers.size,
+    supabase: SUPABASE_AVAILABLE ? 'disponível' : 'indisponível'
   };
   console.log('[Health] Respondendo:', healthData);
   res.json(healthData);
+});
+
+// Endpoint de debug para testar configuração
+app.get('/api/debug/webhook-config', (_req, res) => {
+  console.log('[Debug] Verificando configuração do webhook');
+  res.json({
+    evolutionApiUrl: EVOLUTION_API_URL,
+    evolutionApiKey: EVOLUTION_API_KEY ? '***configurada***' : 'não configurada',
+    supabaseAvailable: SUPABASE_AVAILABLE,
+    connectedUsers: connectedUsers.size,
+    webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'não configurada (usando request host)',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Endpoint para testar conexão com Evolution API
+app.get('/api/debug/test-evolution', async (_req, res) => {
+  console.log('[Debug] Testando conexão com Evolution API');
+
+  if (!EVOLUTION_API_URL) {
+    return res.status(500).json({
+      success: false,
+      error: 'EVOLUTION_API_URL não configurado no backend'
+    });
+  }
+
+  if (!EVOLUTION_API_KEY) {
+    return res.status(500).json({
+      success: false,
+      error: 'EVOLUTION_API_KEY não configurado no backend'
+    });
+  }
+
+  try {
+    const testUrl = `${EVOLUTION_API_URL}/manager/findInstances`;
+    console.log(`[Debug] Testando URL: ${testUrl}`);
+
+    const response = await fetch(testUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+        'X-API-Key': EVOLUTION_API_KEY,
+        Authorization: `Bearer ${EVOLUTION_API_KEY}`,
+      },
+    });
+
+    console.log(`[Debug] Resposta: ${response.status} ${response.statusText}`);
+
+    if (response.ok) {
+      const data = await response.json().catch(() => null);
+      res.json({
+        success: true,
+        message: 'Conexão com Evolution API estabelecida com sucesso',
+        status: response.status,
+        data: data
+      });
+    } else {
+      const errorText = await response.text().catch(() => '');
+      res.status(response.status).json({
+        success: false,
+        error: `Evolution API retornou status ${response.status}`,
+        details: errorText
+      });
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Debug] Erro ao testar Evolution API:', msg);
+    res.status(502).json({
+      success: false,
+      error: `Erro ao conectar com Evolution API: ${msg}`
+    });
+  }
 });
 
 // Webhook para receber eventos da Evolution API
@@ -372,16 +447,24 @@ app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
   const { instanceName } = req.params;
   const userId = req.headers['x-user-id'] || req.body.userId;
   
+  console.log(`[Setup] Iniciando configuração de webhook para instância: ${instanceName}, userId: ${userId}`);
+  
   if (!userId) {
+    console.error('[Setup] ❌ userId não fornecido');
     return res.status(400).json({ error: 'userId é obrigatório' });
   }
 
   if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-    return res.status(500).json({ error: 'Evolution API não configurada' });
+    console.error('[Setup] ❌ Evolution API não configurada');
+    console.error(`[Setup] EVOLUTION_API_URL: ${EVOLUTION_API_URL ? 'OK' : 'MISSING'}`);
+    console.error(`[Setup] EVOLUTION_API_KEY: ${EVOLUTION_API_KEY ? 'OK' : 'MISSING'}`);
+    return res.status(500).json({ error: 'Evolution API não configurada no servidor' });
   }
 
   try {
-    const webhookUrl = `${req.protocol}://${req.get('host')}/api/whatsapp/webhook?uid=${userId}`;
+    // Usar URL externa se disponível, senão usar a do request
+    const baseUrl = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const webhookUrl = `${baseUrl}/api/whatsapp/webhook?uid=${userId}`;
     
     const webhookConfig = {
       webhook: {
@@ -394,9 +477,15 @@ app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
       }
     };
 
-    console.log(`[Setup] Configurando webhook para ${instanceName}: ${webhookUrl}`);
+    console.log(`[Setup] Configurando webhook para ${instanceName}:`);
+    console.log(`[Setup] URL do webhook: ${webhookUrl}`);
+    console.log(`[Setup] Evolution API URL: ${EVOLUTION_API_URL}`);
+    console.log(`[Setup] Config do webhook:`, JSON.stringify(webhookConfig, null, 2));
 
-    const response = await fetch(`${EVOLUTION_API_URL}/webhook/set/${instanceName}`, {
+    const targetUrl = `${EVOLUTION_API_URL}/webhook/set/${instanceName}`;
+    console.log(`[Setup] Fazendo requisição para: ${targetUrl}`);
+
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -407,26 +496,37 @@ app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
       body: JSON.stringify(webhookConfig)
     });
 
+    console.log(`[Setup] Resposta da Evolution API: ${response.status} ${response.statusText}`);
+
     if (response.ok) {
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       console.log(`[Setup] ✅ Webhook configurado com sucesso para ${instanceName}`);
+      console.log(`[Setup] Dados da resposta:`, data);
       res.json({ 
         success: true, 
         message: 'Webhook configurado com sucesso',
         webhookUrl,
+        instanceName,
         data 
       });
     } else {
-      const errorText = await response.text();
-      console.error(`[Setup] ❌ Erro ao configurar webhook: ${response.status} ${errorText}`);
+      const errorText = await response.text().catch(() => 'Erro desconhecido');
+      console.error(`[Setup] ❌ Erro ao configurar webhook: ${response.status} ${response.statusText}`);
+      console.error(`[Setup] Detalhes do erro:`, errorText);
       res.status(response.status).json({ 
-        error: `Erro ao configurar webhook: ${response.status}`,
-        details: errorText 
+        error: `Erro ao configurar webhook: ${response.status} - ${response.statusText}`,
+        details: errorText,
+        instanceName,
+        webhookUrl
       });
     }
   } catch (error) {
-    console.error('[Setup] Erro ao configurar webhook:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[Setup] ❌ Erro fatal ao configurar webhook:', error);
+    res.status(500).json({ 
+      error: error.message,
+      instanceName,
+      stack: error.stack
+    });
   }
 });
 

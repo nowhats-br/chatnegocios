@@ -167,12 +167,21 @@ export function useWebSocket() {
 
   // Configurar webhook automaticamente para instâncias conectadas
   const setupWebhookForInstance = useCallback(async (instanceName: string) => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      console.error('[WebSocket] ❌ Usuário não autenticado para configurar webhook');
+      return false;
+    }
+
+    console.log(`[WebSocket] 🔧 Configurando webhook para instância: ${instanceName}`);
 
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+      const url = `${backendUrl}/api/whatsapp/setup-webhook/${instanceName}`;
       
-      const response = await fetch(`${backendUrl}/api/whatsapp/setup-webhook/${instanceName}`, {
+      console.log(`[WebSocket] 📡 Fazendo requisição para: ${url}`);
+      console.log(`[WebSocket] 👤 User ID: ${user.id}`);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -181,22 +190,28 @@ export function useWebSocket() {
         body: JSON.stringify({ userId: user.id })
       });
 
+      console.log(`[WebSocket] 📥 Resposta recebida: ${response.status} ${response.statusText}`);
+
       if (response.ok) {
         const data = await response.json();
         console.log(`[WebSocket] ✅ Webhook configurado para ${instanceName}:`, data);
-        toast.success(`Webhook configurado para ${instanceName}`);
+        toast.success(`Webhook configurado para ${instanceName}`, {
+          description: `URL: ${data.webhookUrl?.substring(0, 50)}...`
+        });
         return true;
       } else {
-        const error = await response.json();
+        const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
         console.error(`[WebSocket] ❌ Erro ao configurar webhook para ${instanceName}:`, error);
         toast.error(`Erro ao configurar webhook para ${instanceName}`, { 
-          description: error.error 
+          description: error.error || error.details || 'Erro desconhecido'
         });
         return false;
       }
     } catch (error) {
-      console.error(`[WebSocket] ❌ Erro ao configurar webhook para ${instanceName}:`, error);
-      toast.error(`Erro ao configurar webhook para ${instanceName}`);
+      console.error(`[WebSocket] ❌ Erro fatal ao configurar webhook para ${instanceName}:`, error);
+      toast.error(`Erro ao configurar webhook para ${instanceName}`, {
+        description: error instanceof Error ? error.message : 'Erro de conexão'
+      });
       return false;
     }
   }, [user?.id]);

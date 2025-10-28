@@ -233,6 +233,36 @@ export default function Atendimentos() {
     }
   };
 
+  // Função de debug para testar configuração
+  const handleDebugConfig = async () => {
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+      
+      // Testar configuração do webhook
+      const configResponse = await fetch(`${backendUrl}/api/debug/webhook-config`);
+      const configData = await configResponse.json();
+      console.log('[Debug] Configuração do webhook:', configData);
+      
+      // Testar conexão com Evolution API
+      const evolutionResponse = await fetch(`${backendUrl}/api/debug/test-evolution`);
+      const evolutionData = await evolutionResponse.json();
+      console.log('[Debug] Teste Evolution API:', evolutionData);
+      
+      if (evolutionData.success) {
+        toast.success('Configuração OK!', {
+          description: 'Evolution API conectada com sucesso'
+        });
+      } else {
+        toast.error('Problema na configuração', {
+          description: evolutionData.error
+        });
+      }
+    } catch (error) {
+      console.error('[Debug] Erro ao testar configuração:', error);
+      toast.error('Erro ao testar configuração');
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!messageText.trim() || !activeConversation || !user) return;
 
@@ -318,6 +348,17 @@ export default function Atendimentos() {
                 ) : (
                   <BellOff className="w-4 h-4" />
                 )}
+              </Button>
+              
+              {/* Botão de debug */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDebugConfig}
+                className="text-white hover:bg-white/20 p-1"
+                title="Testar configuração da API"
+              >
+                🔧
               </Button>
               
               {/* Botão de configurar webhooks */}
