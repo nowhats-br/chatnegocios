@@ -2,24 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { 
   Search, 
-  RotateCcw, 
-  Calendar, 
   MoreHorizontal,
-  ArrowRight,
-  User,
-  Phone,
-  UserPlus,
-  FileText,
-  Star,
-  ChevronDown,
   Send,
   Paperclip,
   Smile,
   RefreshCw,
-  Bell,
-  BellOff,
-  Wifi,
-  WifiOff
+  History,
+  Calendar,
+  Clock,
+  CheckCircle,
+  ArrowLeftRight,
+  UserPlus,
+  Receipt,
+  Star,
+  ChevronDown,
+  ChevronUp,
+  User
 } from 'lucide-react';
 import { Conversation, ConversationStatus, Message } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
@@ -32,6 +30,11 @@ import { cn } from '@/lib/utils';
 interface ConversationWithDetails extends Conversation {
   lastMessage?: Message;
   unreadCount?: number;
+  contact?: {
+    id: string;
+    name: string;
+    phone_number: string;
+  };
 }
 
 export default function Atendimentos() {
@@ -44,14 +47,11 @@ export default function Atendimentos() {
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
-  const [showInternalNotes, setShowInternalNotes] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [showHistoryDetails, setShowHistoryDetails] = useState(false);
   
   const { user } = useAuth();
-  const { permission, requestPermission, showNotification, playNotificationSound } = useNotifications();
+  const { permission, showNotification, playNotificationSound } = useNotifications();
   const { 
-    isConnected: isWebSocketConnected,
     setOnNewMessage,
     setOnConnectionUpdate 
   } = useWebSocket();
@@ -123,84 +123,28 @@ export default function Atendimentos() {
       // Recarregar conversas para atualizar a lista
       fetchConversations();
       
-      // Atualizar contador de não lidas se não for a conversa ativa
-      if (activeConversation?.id !== message.conversationId) {
-        setUnreadCounts(prev => ({
-          ...prev,
-          [message.conversationId]: (prev[message.conversationId] || 0) + 1
-        }));
-        
-        // Mostrar notificação e tocar som
-        if (notificationsEnabled) {
-          showNotification({
-            title: 'Nova mensagem no WhatsApp',
-            body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
-            tag: `message-${message.conversationId}`,
-          });
-          
-          playNotificationSound();
-        }
-      }
-      
-      // Se é a conversa ativa, recarregar mensagens
-      if (activeConversation?.id === message.conversationId) {
-        fetchMessages(message.conversationId);
+      // Mostrar notificação e tocar som
+      if (permission === 'granted') {
+        showNotification({
+          title: 'Nova mensagem no WhatsApp',
+          body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
+          tag: `message-${message.conversationId}`,
+        });
+        playNotificationSound();
       }
     });
 
     // Callback para atualizações de conexão
     setOnConnectionUpdate((update) => {
       console.log('[WebSocket] Atualização de conexão:', update);
-      // Recarregar conversas quando houver mudança de status
-      fetchConversations();
+      // Pode implementar lógica adicional se necessário
     });
-  }, [
-    setOnNewMessage, 
-    setOnConnectionUpdate, 
-    fetchConversations, 
-    fetchMessages, 
-    activeConversation, 
-    notificationsEnabled, 
-    showNotification, 
-    playNotificationSound
-  ]);
-
-  useEffect(() => {
-    if (activeConversation) {
-      fetchMessages(activeConversation.id);
-      // Limpar contador de não lidas
-      setUnreadCounts(prev => ({
-        ...prev,
-        [activeConversation.id]: 0
-      }));
-    }
-  }, [activeConversation, fetchMessages]);
+  }, [setOnNewMessage, setOnConnectionUpdate, fetchConversations, permission, showNotification, playNotificationSound]);
 
   const handleSelectConversation = (conversation: ConversationWithDetails) => {
     setActiveConversation(conversation);
-    // Limpar contador de não lidas
-    setUnreadCounts(prev => ({
-      ...prev,
-      [conversation.id]: 0
-    }));
+    fetchMessages(conversation.id);
   };
-
-  const handleToggleNotifications = async () => {
-    if (permission === 'default') {
-      const result = await requestPermission();
-      if (result === 'granted') {
-        setNotificationsEnabled(true);
-        toast.success('Notificações ativadas!');
-      } else {
-        toast.error('Permissão para notificações negada');
-      }
-    } else {
-      setNotificationsEnabled(!notificationsEnabled);
-      toast.success(notificationsEnabled ? 'Notificações desativadas' : 'Notificações ativadas');
-    }
-  };
-
-
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || !activeConversation || !user) return;
@@ -215,158 +159,118 @@ export default function Atendimentos() {
 
       setMessageText('');
       fetchMessages(activeConversation.id);
+      fetchConversations();
     } catch (error: any) {
       toast.error('Erro ao enviar mensagem', { description: error.message });
     }
   };
 
-  const handleAddInternalNote = async () => {
-    if (!internalNote.trim() || !activeConversation || !user) return;
+  const filteredConversations = conversations.filter(conv => {
+    const matchesFilter = conv.status === activeFilter;
+    const matchesSearch = !searchTerm || 
+      conv.contact?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      conv.contact?.phone_number?.includes(searchTerm);
+    return matchesFilter && matchesSearch;
+  });
 
-    try {
-      await dbClient.messages.create({
-        conversation_id: activeConversation.id,
-        content: internalNote,
-        sender_is_user: true,
-        message_type: 'internal',
-      });
-
-      setInternalNote('');
-      toast.success('Nota interna adicionada!');
-      fetchMessages(activeConversation.id);
-    } catch (error: any) {
-      toast.error('Erro ao adicionar nota', { description: error.message });
+  const formatTime = (date: string) => {
+    const messageDate = new Date(date);
+    const now = new Date();
+    const diffInHours = (now.getTime() - messageDate.getTime()) / (1000 * 60 * 60);
+    
+    if (diffInHours < 24) {
+      return messageDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } else if (diffInHours < 48) {
+      return 'Ontem';
+    } else {
+      return messageDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     }
   };
 
-  const filteredConversations = conversations
-    .filter(c => c.status === activeFilter)
-    .filter(c => {
-      if (!searchTerm) return true;
-      const contactName = c.contacts?.name?.toLowerCase() || '';
-      const contactPhone = c.contacts?.phone_number || '';
-      const search = searchTerm.toLowerCase();
-      return contactName.includes(search) || contactPhone.includes(search);
-    })
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar esquerda - Lista de conversas */}
-      <div className="w-80 bg-white border-r flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b bg-green-600 text-white">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold">Caixa de Entrada</h1>
-            <div className="flex items-center gap-2">
-              {/* Status de conexão WebSocket */}
-              <div className="flex items-center gap-1 text-xs">
-                {isWebSocketConnected ? (
-                  <>
-                    <Wifi className="w-3 h-3" />
-                    <span>WebSocket</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-3 h-3" />
-                    <span>Offline</span>
-                  </>
-                )}
-              </div>
-              
-              {/* Botão de notificações */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleToggleNotifications}
-                className="text-white hover:bg-white/20 p-1"
-                title={notificationsEnabled ? 'Desativar notificações' : 'Ativar notificações'}
-              >
-                {notificationsEnabled && permission === 'granted' ? (
-                  <Bell className="w-4 h-4" />
-                ) : (
-                  <BellOff className="w-4 h-4" />
-                )}
-              </Button>
-              
-              {/* Botão de auto-configuração */}
+    <div className="flex h-screen w-full bg-gray-50 dark:bg-gray-900">
+      {/* Sidebar de navegação */}
+      <aside className="flex w-20 flex-col items-center border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 py-4">
+        <div className="flex flex-col items-center gap-4">
+          <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-bold text-lg">
+            M
+          </div>
+          <div className="flex flex-col gap-2 items-center">
+            <button className="flex items-center justify-center p-3 rounded-xl bg-primary/20 text-primary">
+              <RefreshCw className="w-5 h-5" />
+            </button>
+            <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
+              <User className="w-5 h-5" />
+            </button>
+            <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
+              <Receipt className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </aside>
 
-              
-              {/* Botão de sincronizar */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={syncConversations}
-                disabled={syncing}
-                className="text-white hover:bg-white/20 p-1"
-                title="Sincronizar conversas"
-              >
-                <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
-              </Button>
+      {/* Lista de conversas */}
+      <nav className="flex w-full max-w-sm flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Caixa de Entrada</h1>
+          
+          {/* Campo de busca */}
+          <div className="mt-4">
+            <div className="flex w-full items-stretch rounded-lg h-11">
+              <div className="text-gray-500 dark:text-gray-400 flex bg-gray-100 dark:bg-gray-800 items-center justify-center pl-3 rounded-l-lg border-y border-l border-gray-200 dark:border-gray-700">
+                <Search className="w-4 h-4" />
+              </div>
+              <input 
+                className="flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-r-lg text-gray-900 dark:text-white focus:outline-0 focus:ring-1 focus:ring-primary border-y border-r border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 h-full placeholder:text-gray-500 dark:placeholder:text-gray-400 px-2 text-sm font-normal"
+                placeholder="Buscar por nome ou número"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
           </div>
-        </div>
 
-        {/* Busca */}
-        <div className="p-3 border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar por nome ou número"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-        </div>
-
-        {/* Filtros */}
-        <div className="flex border-b bg-gray-50">
-          {(['active', 'pending', 'resolved'] as ConversationStatus[]).map((status) => (
-            <button
-              key={status}
-              onClick={() => setActiveFilter(status)}
+          {/* Filtros */}
+          <div className="flex gap-2 pt-4">
+            <button 
+              onClick={() => setActiveFilter('pending')}
               className={cn(
-                "flex-1 px-3 py-2 text-sm font-medium transition-colors",
-                activeFilter === status
-                  ? "bg-white text-green-600 border-b-2 border-green-600"
-                  : "text-gray-600 hover:text-gray-800"
+                "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
+                activeFilter === 'pending' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
               )}
             >
-              {status === 'active' && 'Ativos'}
-              {status === 'pending' && 'Aguardando'}
-              {status === 'resolved' && 'Finalizados'}
+              <p className="text-sm font-medium leading-normal">Ativos</p>
             </button>
-          ))}
+            <button 
+              onClick={() => setActiveFilter('pending')}
+              className={cn(
+                "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
+                activeFilter === 'pending' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+              )}
+            >
+              <p className="text-sm font-medium leading-normal">Aguardando</p>
+            </button>
+            <button 
+              onClick={() => setActiveFilter('resolved')}
+              className={cn(
+                "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
+                activeFilter === 'resolved' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+              )}
+            >
+              <p className="text-sm font-medium leading-normal">Finalizados</p>
+            </button>
+          </div>
         </div>
 
         {/* Lista de conversas */}
         <div className="flex-1 overflow-y-auto">
-          {syncing && (
-            <div className="p-3 bg-blue-50 border-b text-center">
-              <div className="flex items-center justify-center gap-2 text-blue-600 text-sm">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Configurando webhooks do WhatsApp...</span>
-              </div>
-            </div>
-          )}
-          
           {loading ? (
-            <div className="flex justify-center items-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-primary" />
             </div>
           ) : filteredConversations.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <div className="mb-4">
-                <User className="w-16 h-16 mx-auto text-gray-300" />
-              </div>
-              <h3 className="font-medium text-gray-700 mb-2">Nenhuma conversa encontrada</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                {activeFilter === 'pending' 
-                  ? 'Não há conversas pendentes no momento'
-                  : `Não há conversas ${activeFilter === 'active' ? 'ativas' : 'finalizadas'}`
-                }
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <p className="text-gray-500 dark:text-gray-400 mb-4">
+                Nenhuma conversa encontrada
               </p>
               <Button
                 onClick={syncConversations}
@@ -384,293 +288,242 @@ export default function Atendimentos() {
                 key={conversation.id}
                 onClick={() => handleSelectConversation(conversation)}
                 className={cn(
-                  "p-3 border-b cursor-pointer hover:bg-gray-50 transition-colors",
-                  activeConversation?.id === conversation.id && "bg-green-50 border-r-4 border-r-green-500"
+                  "flex gap-4 px-4 py-3 justify-between cursor-pointer transition-colors",
+                  activeConversation?.id === conversation.id 
+                    ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" 
+                    : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
                 )}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-center gap-4">
                   <div className="relative">
-                    <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
-                      <User className="w-6 h-6 text-gray-600" />
+                    <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-semibold">
+                      {conversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
                     </div>
-                    {(conversation.unreadCount || unreadCounts[conversation.id]) && (conversation.unreadCount || unreadCounts[conversation.id]) > 0 && (
-                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 text-white text-xs rounded-full flex items-center justify-center">
-                        {conversation.unreadCount || unreadCounts[conversation.id]}
-                      </div>
-                    )}
+                    <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800"></span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-gray-900 truncate">
-                        {conversation.contacts?.name || conversation.contacts?.phone_number || 'Desconhecido'}
-                      </h3>
-                      <span className="text-xs text-gray-500">
-                        {new Date(conversation.updated_at).toLocaleTimeString('pt-BR', { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600 truncate mt-1">
-                      {conversation.lastMessage?.content || 'Nenhuma mensagem'}
+                  <div className="flex flex-1 flex-col justify-center">
+                    <p className="text-gray-900 dark:text-white text-base font-medium leading-normal">
+                      {conversation.contact?.name || 'Usuário'}
                     </p>
-                    {conversation.status === 'active' && (
-                      <span className="inline-block mt-1 text-xs text-green-600 font-medium">
-                        Online
-                      </span>
-                    )}
+                    <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal truncate">
+                      {conversation.lastMessage?.content || 'Sem mensagens'}
+                    </p>
                   </div>
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  <p className="text-gray-500 dark:text-gray-400 text-xs">
+                    {conversation.lastMessage?.created_at ? formatTime(conversation.lastMessage.created_at) : ''}
+                  </p>
+                  {conversation.unreadCount && conversation.unreadCount > 0 && (
+                    <div className="flex size-6 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">
+                      {conversation.unreadCount}
+                    </div>
+                  )}
                 </div>
               </div>
             ))
           )}
         </div>
-      </div>
+      </nav>
 
-      {/* Área central do chat */}
-      <div className="flex-1 flex flex-col">
+      {/* Área principal do chat */}
+      <main className="flex flex-1 flex-col bg-gray-100/50 dark:bg-gray-900/20">
         {activeConversation ? (
           <>
             {/* Header do chat */}
-            <div className="bg-green-600 text-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                  <User className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="font-semibold">
-                    {activeConversation.contacts?.name || 'Cliente'}
-                  </h2>
-                  <p className="text-sm text-green-100">Online</p>
-                </div>
+            <header className="flex items-center gap-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 px-6 py-3">
+              <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-semibold">
+                {activeConversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
               </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {activeConversation.contact?.name || 'Usuário'}
+                </h2>
+                <p className="text-sm text-green-600 dark:text-green-400">Online</p>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <button className="flex items-center justify-center size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400">
+                  <Search className="w-5 h-5" />
+                </button>
+                <button className="flex items-center justify-center size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400">
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+              </div>
+            </header>
 
-              {/* Ações do chat */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-white hover:bg-white/20"
-                  title="Reabrir Ticket"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-white hover:bg-white/20"
-                  title="Agendamento"
-                >
-                  <Calendar className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-white hover:bg-white/20"
-                  title="Mover p/ Pendente"
-                >
-                  <MoreHorizontal className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-white hover:bg-white/20"
-                  title="Resolver Conversa"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-white hover:bg-white/20"
-                  title="Transferir Conversa"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
+            {/* Barra de ações */}
+            <div className="flex items-center justify-around gap-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 px-4 py-2 text-xs text-center">
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <History className="w-4 h-4" />
+                <span>Reabrir Ticket</span>
+              </button>
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <Calendar className="w-4 h-4" />
+                <span>Agendamento</span>
+              </button>
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <Clock className="w-4 h-4" />
+                <span>Mover p/ Pendente</span>
+              </button>
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <CheckCircle className="w-4 h-4" />
+                <span>Resolver Conversa</span>
+              </button>
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <ArrowLeftRight className="w-4 h-4" />
+                <span>Transferir Conversa</span>
+              </button>
             </div>
 
-            {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-100">
-              {messages.filter(m => !m.internal_message).map((message) => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.sender_is_user ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-xs lg:max-w-md px-4 py-2 rounded-lg shadow-sm",
-                      message.sender_is_user
-                        ? "bg-green-500 text-white rounded-br-none"
-                        : "bg-white text-gray-900 rounded-bl-none"
-                    )}
-                  >
-                    <p className="text-sm">{message.content}</p>
-                    <p className={cn(
-                      "text-xs mt-1 text-right",
-                      message.sender_is_user ? "text-green-100" : "text-gray-500"
-                    )}>
-                      {new Date(message.created_at).toLocaleTimeString('pt-BR', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
+            {/* Área de mensagens */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="text-center my-4">
+                <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 rounded-full px-3 py-1">
+                  Hoje
+                </span>
+              </div>
+              
+              {messages.map((message) => (
+                <div key={message.id} className={cn("flex", message.sender_is_user ? "justify-end" : "justify-start")}>
+                  <div className={cn(
+                    "max-w-lg rounded-xl p-3 shadow-sm",
+                    message.sender_is_user 
+                      ? "rounded-br-none bg-green-100 dark:bg-green-900/50" 
+                      : "rounded-tl-none bg-white dark:bg-gray-800"
+                  )}>
+                    <p className="text-sm text-gray-800 dark:text-gray-200">{message.content}</p>
+                    <div className={cn("flex items-center gap-1 mt-1", message.sender_is_user ? "justify-end" : "justify-start")}>
+                      <span className="text-xs text-gray-600 dark:text-gray-400">
+                        {formatTime(message.created_at)}
+                      </span>
+                      {message.sender_is_user && (
+                        <CheckCircle className="w-3 h-3 text-blue-500" />
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Input de mensagem */}
-            <div className="bg-white border-t p-4">
-              <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2">
-                <Button variant="ghost" size="sm" className="p-2">
-                  <Smile className="w-5 h-5 text-gray-500" />
-                </Button>
-                <Button variant="ghost" size="sm" className="p-2">
-                  <Paperclip className="w-5 h-5 text-gray-500" />
-                </Button>
-                <input
+            {/* Campo de envio de mensagem */}
+            <footer className="bg-white dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex items-center gap-2">
+                <button className="flex items-center justify-center size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400">
+                  <Smile className="w-5 h-5" />
+                </button>
+                <button className="flex items-center justify-center size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400">
+                  <Paperclip className="w-5 h-5" />
+                </button>
+                <input 
+                  className="flex-1 bg-gray-100 dark:bg-gray-800 border-none rounded-lg h-10 px-4 focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white placeholder:text-gray-500"
+                  placeholder="Digite uma mensagem..."
                   type="text"
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Digite uma mensagem..."
-                  className="flex-1 bg-transparent px-2 py-1 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 />
-                <Button
+                <button 
                   onClick={handleSendMessage}
-                  disabled={!messageText.trim()}
-                  size="sm"
-                  className="bg-green-500 hover:bg-green-600 rounded-full p-2"
+                  className="flex items-center justify-center size-10 rounded-full bg-primary text-white hover:bg-primary/90"
                 >
-                  <Send className="w-4 h-4" />
-                </Button>
+                  <Send className="w-5 h-5" />
+                </button>
               </div>
-            </div>
+            </footer>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-100">
+          <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-24 h-24 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <User className="w-12 h-12 text-gray-500" />
+              <div className="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                <RefreshCw className="w-12 h-12 text-gray-400" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                 Selecione uma conversa
               </h3>
-              <p className="text-gray-500">
+              <p className="text-gray-600 dark:text-gray-400">
                 Escolha uma conversa da lista para começar a atender
               </p>
             </div>
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Painel direito - Perfil do cliente */}
+      {/* Painel lateral de informações do cliente */}
       {activeConversation && (
-        <div className="w-80 bg-white border-l flex flex-col">
-          {/* Perfil */}
-          <div className="p-6 border-b text-center">
-            <div className="w-20 h-20 rounded-full bg-gray-300 mx-auto mb-4 flex items-center justify-center">
-              <User className="w-10 h-10 text-gray-600" />
+        <aside className="w-full max-w-sm flex-col border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 flex">
+          {/* Informações do cliente */}
+          <div className="p-6 text-center border-b border-gray-200 dark:border-gray-700">
+            <div className="mx-auto bg-primary rounded-full size-24 mb-4 flex items-center justify-center text-white text-2xl font-bold">
+              {activeConversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
             </div>
-            <h3 className="font-semibold text-gray-900 text-lg">
-              {activeConversation.contacts?.name || 'Maria Souza'}
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+              {activeConversation.contact?.name || 'Usuário'}
             </h3>
-            <p className="text-gray-600 flex items-center justify-center gap-1 mt-1">
-              <Phone className="w-4 h-4" />
-              {activeConversation.contacts?.phone_number || '+55 11 98765-4321'}
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {activeConversation.contact?.phone_number || 'Sem telefone'}
             </p>
-            
-            <div className="flex justify-center gap-2 mt-3">
-              <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+            <div className="mt-4 flex justify-center gap-2">
+              <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/50 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-700/10 dark:ring-blue-300/20">
                 VIP
               </span>
-              <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+              <span className="inline-flex items-center rounded-md bg-green-50 dark:bg-green-900/50 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-300 ring-1 ring-inset ring-green-600/20 dark:ring-green-300/20">
                 Cliente Novo
               </span>
             </div>
           </div>
 
-          {/* Notas Internas */}
-          <div className="p-4 border-b">
-            <button
-              onClick={() => setShowInternalNotes(!showInternalNotes)}
-              className="flex items-center justify-between w-full text-left"
-            >
-              <span className="font-medium text-gray-900">Notas Internas</span>
-              <ChevronDown className={cn(
-                "w-4 h-4 transition-transform",
-                showInternalNotes && "rotate-180"
-              )} />
-            </button>
-            
-            {showInternalNotes && (
-              <div className="mt-3 space-y-3">
-                <textarea
-                  value={internalNote}
-                  onChange={(e) => setInternalNote(e.target.value)}
-                  placeholder="Adicione uma nota sobre o cliente..."
-                  className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
-                  rows={3}
-                />
-                <Button
-                  onClick={handleAddInternalNote}
-                  disabled={!internalNote.trim()}
-                  size="sm"
-                  className="w-full bg-green-500 hover:bg-green-600"
-                >
-                  Adicionar Nota
-                </Button>
-                
-                {/* Notas existentes */}
-                <div className="space-y-2">
-                  {messages.filter(m => m.internal_message).map((note) => (
-                    <div key={note.id} className="p-2 bg-yellow-50 border border-yellow-200 rounded text-sm">
-                      <p className="text-gray-700">{note.content}</p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {new Date(note.created_at).toLocaleString('pt-BR')}
-                      </p>
-                    </div>
-                  ))}
+          {/* Notas internas e ações */}
+          <div className="p-6 space-y-6 flex-1 overflow-y-auto">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-2">Notas Internas</h4>
+              <textarea 
+                className="w-full rounded-lg bg-gray-100 dark:bg-gray-800 border-none focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white placeholder:text-gray-500"
+                placeholder="Adicione uma nota sobre o cliente..."
+                rows={4}
+                value={internalNote}
+                onChange={(e) => setInternalNote(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-3">
+              <button className="w-full flex items-center justify-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm text-gray-700 dark:text-gray-300">
+                <UserPlus className="w-4 h-4" />
+                <span>Anexar cliente a uma carteira</span>
+              </button>
+              <button className="w-full flex items-center justify-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm text-gray-700 dark:text-gray-300">
+                <Receipt className="w-4 h-4" />
+                <span>Criar protocolo manual</span>
+              </button>
+              <button className="w-full flex items-center justify-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm text-gray-700 dark:text-gray-300">
+                <Star className="w-4 h-4" />
+                <span>Enviar avaliação de atendimento</span>
+              </button>
+            </div>
+
+            {/* Histórico de atendimentos */}
+            <div>
+              <button 
+                onClick={() => setShowHistoryDetails(!showHistoryDetails)}
+                className="cursor-pointer flex justify-between items-center text-sm font-semibold text-gray-600 dark:text-gray-300 w-full"
+              >
+                Histórico de Atendimentos
+                {showHistoryDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              {showHistoryDetails && (
+                <div className="mt-2 space-y-2 border-l-2 border-gray-200 dark:border-gray-700 pl-4 text-sm">
+                  <div className="text-gray-700 dark:text-gray-300">
+                    <p><span className="font-medium">25/07/2024:</span> Dúvida sobre entrega.</p>
+                    <p className="text-xs text-gray-500">Finalizado por: Carlos</p>
+                  </div>
+                  <div className="text-gray-700 dark:text-gray-300">
+                    <p><span className="font-medium">12/06/2024:</span> Solicitação de troca.</p>
+                    <p className="text-xs text-gray-500">Finalizado por: Ana</p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-
-          {/* Ações do cliente */}
-          <div className="p-4 space-y-3">
-            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
-              <UserPlus className="w-4 h-4 mr-2" />
-              Anexar cliente a uma carteira
-            </Button>
-            
-            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
-              <FileText className="w-4 h-4 mr-2" />
-              Criar protocolo manual
-            </Button>
-            
-            <Button variant="outline" className="w-full justify-start hover:bg-gray-50">
-              <Star className="w-4 h-4 mr-2" />
-              Enviar avaliação de atendimento
-            </Button>
-          </div>
-
-          {/* Histórico */}
-          <div className="p-4 border-t">
-            <button className="flex items-center justify-between w-full text-left">
-              <span className="font-medium text-gray-900">Histórico de Atendimentos</span>
-              <ChevronDown className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        </aside>
       )}
     </div>
   );

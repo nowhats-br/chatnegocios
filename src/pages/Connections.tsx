@@ -58,12 +58,19 @@ export default function Connections() {
         filter: `user_id=eq.${user.id}` 
       }, (payload: any) => {
         console.log('Mudança na tabela connections:', payload);
-        // Só atualizar se não for uma mudança de status para PAUSED
-        if (payload.new && payload.new.status !== 'PAUSED') {
-          fetchConnections();
-        } else if (payload.eventType === 'DELETE') {
+        
+        if (payload.eventType === 'DELETE') {
           // Remover da lista local quando deletado
           setConnections(prev => prev.filter(c => c.id !== payload.old.id));
+          console.log('Conexão removida da lista local:', payload.old.id);
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          // Atualizar apenas o item específico
+          setConnections(prev => prev.map(c => 
+            c.id === payload.new.id ? { ...c, ...payload.new } : c
+          ));
+        } else if (payload.eventType === 'INSERT' && payload.new) {
+          // Adicionar nova conexão
+          setConnections(prev => [payload.new, ...prev]);
         }
       })
       .subscribe();
@@ -74,7 +81,7 @@ export default function Connections() {
         clearInterval(connectionCheckInterval);
       }
     };
-  }, [user, fetchConnections, connectionCheckInterval]);
+  }, [user, connectionCheckInterval]);
 
   const checkConnectionStatus = async (connection: Connection) => {
     try {
@@ -135,18 +142,15 @@ export default function Connections() {
     }
   };
 
-  const handleConnect = async (connection: Connection) => {
-    setSelectedConnection(connection);
-    setIsQrModalOpen(true);
+  // Função para gerar QR Code (pode ser chamada a qualquer momento)
+  const generateQrCode = async (connection: Connection) => {
     setIsConnecting(connection.id);
     setQrCodeData('');
 
     try {
-      await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
-      setConnections(prev => prev.map(c => 
-        c.id === connection.id ? { ...c, status: 'INITIALIZING' } : c
-      ));
-
+      console.log(`Gerando QR Code para: ${connection.instance_name}`);
+      
+      // Primeiro tentar obter QR code diretamente
       const connectResponse = await evolutionApiRequest<any>(API_ENDPOINTS.INSTANCE_CONNECT(connection.instance_name), {
         method: 'GET',
         suppressToast: true,
@@ -154,36 +158,61 @@ export default function Connections() {
 
       if (connectResponse?.base64 || connectResponse?.qrcode) {
         setQrCodeData(connectResponse.base64 || connectResponse.qrcode);
+        
+        // Atualizar status para aguardando QR
         await dbClient.connections.update(connection.id, { status: 'WAITING_QR_CODE' });
         setConnections(prev => prev.map(c => 
           c.id === connection.id ? { ...c, status: 'WAITING_QR_CODE' } : c
         ));
 
+        // Iniciar monitoramento da conexão
         const interval = setInterval(() => {
           checkConnectionStatus(connection);
         }, 3000);
         
         setConnectionCheckInterval(interval);
         
+        // Limpar intervalo após 5 minutos
         setTimeout(() => {
           if (interval) {
             clearInterval(interval);
             setConnectionCheckInterval(null);
           }
         }, 300000);
+        
+        console.log('QR Code gerado com sucesso');
+      } else {
+        throw new Error('Não foi possível gerar o QR Code. Tente novamente.');
       }
 
     } catch (error: any) {
-      console.error('Erro ao conectar:', error);
-      toast.error('Erro ao iniciar conexão', { description: error.message });
+      console.error('Erro ao gerar QR Code:', error);
+      toast.error('Erro ao gerar QR Code', { 
+        description: error.message || 'Tente novamente em alguns segundos.' 
+      });
+      
+      // Manter status como desconectado se falhar
       await dbClient.connections.update(connection.id, { status: 'DISCONNECTED' });
       setConnections(prev => prev.map(c => 
         c.id === connection.id ? { ...c, status: 'DISCONNECTED' } : c
       ));
-      setIsQrModalOpen(false);
     } finally {
       setIsConnecting(null);
     }
+  };
+
+  const handleConnect = async (connection: Connection) => {
+    setSelectedConnection(connection);
+    setIsQrModalOpen(true);
+    
+    // Atualizar status para inicializando
+    await dbClient.connections.update(connection.id, { status: 'INITIALIZING' });
+    setConnections(prev => prev.map(c => 
+      c.id === connection.id ? { ...c, status: 'INITIALIZING' } : c
+    ));
+
+    // Gerar QR Code
+    await generateQrCode(connection);
   };
 
   const handleDisconnect = async (connection: Connection) => {
@@ -545,11 +574,11 @@ export default function Connections() {
     };
 
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]">
+      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]">
         {/* Header with WhatsApp icon and status */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
+            <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
               <Smartphone className="w-6 h-6 text-green-600 dark:text-green-400" />
             </div>
             <div>
@@ -568,7 +597,7 @@ export default function Connections() {
 
         {/* Phone number display */}
         {status === 'CONNECTED' && phoneNumber !== 'Não disponível' && (
-          <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+          <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-md">
             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-1">
               <Phone className="w-4 h-4" />
               <span>Telefone Conectado:</span>
@@ -609,68 +638,85 @@ export default function Connections() {
         </div>
 
         {/* Action buttons */}
-        <div className="flex flex-wrap gap-2">
-          {status === 'DISCONNECTED' && (
-            <Button
-              onClick={() => handleConnect(connection)}
-              disabled={isLoading}
-              loading={isLoading}
-              className="bg-green-500 hover:bg-green-600 text-white border-0 flex-1 min-w-[120px]"
-            >
-              <QrCode className="w-4 h-4 mr-2" />
-              Conectar
-            </Button>
-          )}
+        <div className="space-y-3">
+          {/* Primary action buttons */}
+          <div className="grid grid-cols-2 gap-3">
+            {status === 'DISCONNECTED' && (
+              <>
+                <Button
+                  onClick={() => handleConnect(connection)}
+                  disabled={isLoading}
+                  loading={isLoading}
+                  className="bg-green-500 hover:bg-green-600 text-white border-0 h-10 flex items-center justify-center"
+                >
+                  <QrCode className="w-4 h-4 mr-2" />
+                  Conectar
+                </Button>
+                <Button
+                  onClick={() => {
+                    setSelectedConnection(connection);
+                    setIsQrModalOpen(true);
+                    generateQrCode(connection);
+                  }}
+                  disabled={isLoading}
+                  className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center"
+                >
+                  <QrCode className="w-4 h-4 mr-2" />
+                  Ver QR Code
+                </Button>
+              </>
+            )}
 
-          {status === 'WAITING_QR_CODE' && (
-            <Button
-              onClick={() => {
-                setSelectedConnection(connection);
-                setIsQrModalOpen(true);
-              }}
-              className="bg-blue-500 hover:bg-blue-600 text-white border-0 flex-1 min-w-[120px]"
-            >
-              <QrCode className="w-4 h-4 mr-2" />
-              Ver QR Code
-            </Button>
-          )}
-
-          {status === 'CONNECTED' && (
-            <>
+            {status === 'WAITING_QR_CODE' && (
               <Button
-                onClick={() => handleDisconnect(connection)}
-                className="bg-green-500 hover:bg-green-600 text-white border-0 flex-1 min-w-[120px]"
+                onClick={() => {
+                  setSelectedConnection(connection);
+                  setIsQrModalOpen(true);
+                }}
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center col-span-2"
               >
-                <WifiOff className="w-4 h-4 mr-2" />
-                Desconectar
+                <QrCode className="w-4 h-4 mr-2" />
+                Ver QR Code
               </Button>
+            )}
+
+            {status === 'CONNECTED' && (
+              <>
+                <Button
+                  onClick={() => handleDisconnect(connection)}
+                  className="bg-green-500 hover:bg-green-600 text-white border-0 h-10 flex items-center justify-center"
+                >
+                  <WifiOff className="w-4 h-4 mr-2" />
+                  Desconectar
+                </Button>
+                <Button
+                  onClick={() => handlePause(connection)}
+                  className="bg-orange-500 hover:bg-orange-600 text-white border-0 h-10 flex items-center justify-center"
+                >
+                  <Pause className="w-4 h-4 mr-2" />
+                  Pausar
+                </Button>
+              </>
+            )}
+
+            {status === 'PAUSED' && (
               <Button
-                onClick={() => handlePause(connection)}
-                className="bg-orange-500 hover:bg-orange-600 text-white border-0 flex-1 min-w-[120px]"
+                onClick={() => handleResume(connection)}
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center col-span-2"
               >
-                <Pause className="w-4 h-4 mr-2" />
-                Pausar
+                <Play className="w-4 h-4 mr-2" />
+                Retomar
               </Button>
-            </>
-          )}
+            )}
+          </div>
 
-          {status === 'PAUSED' && (
-            <Button
-              onClick={() => handleResume(connection)}
-              className="bg-blue-500 hover:bg-blue-600 text-white border-0 flex-1 min-w-[120px]"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Retomar
-            </Button>
-          )}
-
-          {/* Secondary actions */}
-          <div className="flex gap-2 w-full mt-2">
+          {/* Secondary action buttons */}
+          <div className="grid grid-cols-2 gap-3">
             {status === 'CONNECTED' && (
               <Button
                 onClick={() => syncLastConversations(connection)}
                 variant="outline"
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300 flex-1"
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300 h-10 flex items-center justify-center"
                 title="Sincronizar conversas do WhatsApp"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
@@ -683,7 +729,7 @@ export default function Connections() {
                 setIsDeleteDialogOpen(true);
               }}
               variant="outline"
-              className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 hover:border-red-300"
+              className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 hover:border-red-300 h-10 flex items-center justify-center"
             >
               <Trash2 className="w-4 h-4 mr-2" />
               Excluir
@@ -721,8 +767,8 @@ export default function Connections() {
         {/* Empty state - First connection */}
         {!loading && connections.length === 0 && (
           <div className="max-w-md mx-auto">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
-              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
+              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center mx-auto mb-6">
                 <Smartphone className="w-8 h-8 text-blue-600 dark:text-blue-400" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
@@ -733,7 +779,7 @@ export default function Connections() {
               </p>
               <Button
                 onClick={() => setIsCreateModalOpen(true)}
-                className="bg-blue-500 hover:bg-blue-600 text-white border-0 w-full py-3 text-lg font-semibold"
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 w-full h-12 flex items-center justify-center text-lg font-semibold"
               >
                 <QrCode className="w-5 h-5 mr-2" />
                 Criar Instância
@@ -757,7 +803,7 @@ export default function Connections() {
               </div>
               <Button
                 onClick={() => setIsCreateModalOpen(true)}
-                className="bg-blue-500 hover:bg-blue-600 text-white border-0"
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Nova Conexão
@@ -801,6 +847,7 @@ export default function Connections() {
               <Button 
                 variant="ghost" 
                 onClick={() => setIsCreateModalOpen(false)}
+                className="h-10 flex items-center justify-center"
               >
                 Cancelar
               </Button>
@@ -808,7 +855,7 @@ export default function Connections() {
                 onClick={handleCreateInstance} 
                 disabled={isCreating}
                 loading={isCreating}
-                className="bg-blue-500 hover:bg-blue-600 text-white border-0"
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center"
               >
                 Criar Instância
               </Button>
@@ -860,19 +907,31 @@ export default function Connections() {
               </div>
             )}
             
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                setIsQrModalOpen(false);
-                if (connectionCheckInterval) {
-                  clearInterval(connectionCheckInterval);
-                  setConnectionCheckInterval(null);
-                }
-              }}
-              className="w-full"
-            >
-              Fechar
-            </Button>
+            <div className="flex gap-3">
+              {qrCodeData && selectedConnection && (
+                <Button 
+                  onClick={() => generateQrCode(selectedConnection)}
+                  disabled={isConnecting === selectedConnection.id}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white border-0 h-10 flex items-center justify-center"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isConnecting === selectedConnection.id ? 'animate-spin' : ''}`} />
+                  Gerar Novo QR
+                </Button>
+              )}
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setIsQrModalOpen(false);
+                  if (connectionCheckInterval) {
+                    clearInterval(connectionCheckInterval);
+                    setConnectionCheckInterval(null);
+                  }
+                }}
+                className={`${qrCodeData ? 'flex-1' : 'w-full'} h-10 flex items-center justify-center`}
+              >
+                Fechar
+              </Button>
+            </div>
           </div>
         </Modal>
 
