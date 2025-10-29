@@ -16,8 +16,7 @@ import {
   Receipt,
   Star,
   ChevronDown,
-  ChevronUp,
-  User
+  ChevronUp
 } from 'lucide-react';
 import { Conversation, ConversationStatus, Message } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
@@ -102,32 +101,47 @@ export default function Atendimentos() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Configurar callbacks do WebSocket
+  // Configurar callbacks do WebSocket para criação automática de tickets
   useEffect(() => {
-    // Callback para novas mensagens via WebSocket
+    // Callback para novas mensagens via WebSocket - CRIA TICKETS AUTOMATICAMENTE
     setOnNewMessage((message) => {
-      console.log('[WebSocket] Nova mensagem recebida:', message);
+      console.log('[Ticket System] Nova mensagem recebida - Criando/Atualizando ticket:', message);
       
-      // Recarregar conversas para atualizar a lista
+      // Atualizar a lista de tickets (conversas) imediatamente
       fetchConversations();
       
-      // Mostrar notificação e tocar som
+      // Se a conversa ativa é a que recebeu a mensagem, atualizar as mensagens também
+      if (activeConversation?.id === message.conversationId) {
+        fetchMessages(message.conversationId);
+      }
+      
+      // Mostrar notificação do novo ticket/mensagem
       if (permission === 'granted') {
         showNotification({
-          title: 'Nova mensagem no WhatsApp',
+          title: 'Novo Ticket - WhatsApp',
           body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
-          tag: `message-${message.conversationId}`,
+          tag: `ticket-${message.conversationId}`,
         });
         playNotificationSound();
       }
+      
+      // Log para debug do sistema de tickets
+      console.log(`[Ticket System] Ticket atualizado para contato: ${message.contactName} (${message.contactPhone})`);
     });
 
-    // Callback para atualizações de conexão
+    // Callback para atualizações de conexão - SINCRONIZA TICKETS QUANDO CONECTA
     setOnConnectionUpdate((update) => {
-      console.log('[WebSocket] Atualização de conexão:', update);
-      // Pode implementar lógica adicional se necessário
+      console.log('[Ticket System] Atualização de conexão:', update);
+      
+      if (update.status === 'CONNECTED') {
+        console.log('[Ticket System] WhatsApp conectado - Sincronizando tickets automaticamente...');
+        // Aguardar um pouco para garantir que o webhook foi configurado
+        setTimeout(() => {
+          fetchConversations();
+        }, 2000);
+      }
     });
-  }, [setOnNewMessage, setOnConnectionUpdate, fetchConversations, permission, showNotification, playNotificationSound]);
+  }, [setOnNewMessage, setOnConnectionUpdate, fetchConversations, fetchMessages, activeConversation, permission, showNotification, playNotificationSound]);
 
   const handleSelectConversation = (conversation: ConversationWithDetails) => {
     setActiveConversation(conversation);
@@ -183,22 +197,6 @@ export default function Atendimentos() {
           <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-bold text-lg">
             M
           </div>
-          <div className="flex flex-col gap-2 items-center">
-            <button className="flex items-center justify-center p-3 rounded-xl bg-primary/20 text-primary">
-              <RefreshCw className="w-5 h-5" />
-            </button>
-            <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
-              <User className="w-5 h-5" />
-            </button>
-            <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
-              <Receipt className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-        <div className="mt-auto flex flex-col gap-2 items-center">
-          <button className="flex items-center justify-center p-3 rounded-xl text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800">
-            <User className="w-5 h-5" />
-          </button>
         </div>
       </aside>
 
@@ -261,51 +259,103 @@ export default function Atendimentos() {
               <RefreshCw className="w-6 h-6 animate-spin text-primary" />
             </div>
           ) : filteredConversations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <p className="text-gray-500 dark:text-gray-400">
-                Nenhuma conversa encontrada
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+                <RefreshCw className="w-8 h-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                Aguardando Tickets
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs">
+                Os tickets aparecerão aqui automaticamente quando chegarem mensagens no WhatsApp
               </p>
+              <div className="mt-4 flex items-center gap-2 text-xs text-gray-400">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>Sistema conectado via WebSocket</span>
+              </div>
             </div>
           ) : (
-            filteredConversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                onClick={() => handleSelectConversation(conversation)}
-                className={cn(
-                  "flex gap-4 px-4 py-3 justify-between cursor-pointer transition-colors",
-                  activeConversation?.id === conversation.id 
-                    ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" 
-                    : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                )}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-semibold">
-                      {conversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
-                    </div>
-                    <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800"></span>
-                  </div>
-                  <div className="flex flex-1 flex-col justify-center">
-                    <p className="text-gray-900 dark:text-white text-base font-medium leading-normal">
-                      {conversation.contact?.name || 'Usuário'}
-                    </p>
-                    <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal truncate">
-                      {conversation.lastMessage?.content || 'Sem mensagens'}
-                    </p>
-                  </div>
-                </div>
-                <div className="shrink-0 flex flex-col items-end gap-1">
-                  <p className="text-gray-500 dark:text-gray-400 text-xs">
-                    {conversation.lastMessage?.created_at ? formatTime(conversation.lastMessage.created_at) : ''}
-                  </p>
-                  {conversation.unreadCount && conversation.unreadCount > 0 && (
-                    <div className="flex size-6 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">
-                      {conversation.unreadCount}
-                    </div>
+            filteredConversations.map((conversation) => {
+              // Determinar se é um ticket novo (não lido)
+              const isNewTicket = conversation.unreadCount && conversation.unreadCount > 0;
+              const isActiveTicket = activeConversation?.id === conversation.id;
+              
+              return (
+                <div
+                  key={conversation.id}
+                  onClick={() => handleSelectConversation(conversation)}
+                  className={cn(
+                    "flex gap-4 px-4 py-3 justify-between cursor-pointer transition-all duration-200",
+                    isActiveTicket 
+                      ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" 
+                      : "hover:bg-gray-50 dark:hover:bg-gray-800/50",
+                    isNewTicket && "bg-blue-50/50 dark:bg-blue-900/10"
                   )}
+                >
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="relative flex-shrink-0">
+                      {/* Avatar do contato - estilo WhatsApp Web */}
+                      <div className="bg-gradient-to-br from-primary to-primary/80 rounded-full size-12 flex items-center justify-center text-white font-semibold text-lg shadow-sm">
+                        {conversation.contact?.name?.charAt(0)?.toUpperCase() || 
+                         conversation.contact?.phone_number?.slice(-2) || 'U'}
+                      </div>
+                      {/* Indicador de status online */}
+                      <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800"></span>
+                    </div>
+                    
+                    <div className="flex flex-1 flex-col justify-center min-w-0">
+                      {/* Nome do contato */}
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-gray-900 dark:text-white text-base font-medium leading-normal truncate">
+                          {conversation.contact?.name || `+${conversation.contact?.phone_number}` || 'Usuário Desconhecido'}
+                        </p>
+                        {isNewTicket && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
+                            Novo
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Última mensagem */}
+                      <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal truncate">
+                        {conversation.lastMessage?.sender_is_user ? '✓ ' : ''}
+                        {conversation.lastMessage?.content || 'Ticket criado - Aguardando primeira mensagem'}
+                      </p>
+                      
+                      {/* Informações do ticket */}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          📱 {conversation.contact?.phone_number || 'Sem número'}
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          • Ticket #{conversation.id.slice(-6)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    <p className="text-gray-500 dark:text-gray-400 text-xs">
+                      {conversation.lastMessage?.created_at ? formatTime(conversation.lastMessage.created_at) : 'Agora'}
+                    </p>
+                    {isNewTicket && (
+                      <div className="flex size-6 items-center justify-center rounded-full bg-primary text-white text-xs font-bold animate-pulse">
+                        {conversation.unreadCount}
+                      </div>
+                    )}
+                    {/* Status do ticket */}
+                    <div className={cn(
+                      "text-xs px-2 py-0.5 rounded-full font-medium",
+                      conversation.status === 'pending' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300",
+                      conversation.status === 'resolved' && "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+                    )}>
+                      {conversation.status === 'pending' ? 'Pendente' : 'Resolvido'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
+          )}
           )}
         </div>
       </nav>
@@ -416,17 +466,26 @@ export default function Atendimentos() {
             </footer>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                <RefreshCw className="w-12 h-12 text-gray-400" />
+          <div className="flex-1 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/20">
+            <div className="text-center max-w-md">
+              <div className="w-32 h-32 bg-gradient-to-br from-primary/10 to-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <RefreshCw className="w-16 h-16 text-primary" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Selecione uma conversa
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+                Sistema de Tickets
               </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Escolha uma conversa da lista para começar a atender
+              <p className="text-gray-600 dark:text-gray-400 mb-4">
+                Selecione um ticket da lista para iniciar o atendimento
               </p>
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Como funciona:</h4>
+                <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1 text-left">
+                  <li>• Tickets são criados automaticamente via WhatsApp</li>
+                  <li>• Mensagens chegam em tempo real via WebSocket</li>
+                  <li>• Cada conversa é um ticket independente</li>
+                  <li>• Status: Pendente → Em Atendimento → Resolvido</li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
