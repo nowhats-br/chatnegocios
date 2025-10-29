@@ -6,6 +6,7 @@ const bodyParser = require('body-parser');
 const dotenv = require('dotenv');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
+const crypto = require('crypto');
 
 dotenv.config();
 
@@ -86,40 +87,315 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 // Mapa de usuários conectados via WebSocket
 const connectedUsers = new Map();
 
-// Configuração do WebSocket
+// Enhanced logging system with correlation IDs
+class Logger {
+  constructor() {
+    this.logLevel = process.env.LOG_LEVEL || 'info';
+    this.levels = { error: 0, warn: 1, info: 2, debug: 3 };
+  }
+
+  generateCorrelationId() {
+    return crypto.randomBytes(8).toString('hex');
+  }
+
+  shouldLog(level) {
+    return this.levels[level] <= this.levels[this.logLevel];
+  }
+
+  formatMessage(level, category, message, correlationId = null, metadata = {}) {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      level: level.toUpperCase(),
+      category,
+      message,
+      ...(correlationId && { correlationId }),
+      ...metadata
+    };
+
+    const colorMap = {
+      error: '\x1b[31m',
+      warn: '\x1b[33m', 
+      info: '\x1b[32m',
+      debug: '\x1b[36m'
+    };
+    const color = colorMap[level] || '';
+    const reset = '\x1b[0m';
+
+    return `${color}[${timestamp}] [${level.toUpperCase()}] [${category}]${reset} ${message}${correlationId ? ` (ID: ${correlationId})` : ''}${Object.keys(metadata).length ? ` ${JSON.stringify(metadata)}` : ''}`;
+  }
+
+  log(level, category, message, correlationId = null, metadata = {}) {
+    if (this.shouldLog(level)) {
+      console.log(this.formatMessage(level, category, message, correlationId, metadata));
+    }
+  }
+
+  error(category, message, correlationId = null, metadata = {}) {
+    this.log('error', category, message, correlationId, metadata);
+  }
+
+  warn(category, message, correlationId = null, metadata = {}) {
+    this.log('warn', category, message, correlationId, metadata);
+  }
+
+  info(category, message, correlationId = null, metadata = {}) {
+    this.log('info', category, message, correlationId, metadata);
+  }
+
+  debug(category, message, correlationId = null, metadata = {}) {
+    this.log('debug', category, message, correlationId, metadata);
+  }
+}
+
+const logger = new Logger();
+
+// WebSocket connection tracking with detailed status
+class ConnectionTracker {
+  constructor() {
+    this.connections = new Map();
+    this.messageStats = {
+      sent: 0,
+      delivered: 0,
+      failed: 0,
+      acknowledged: 0
+    };
+  }
+
+  addConnection(userId, socketId, socket) {
+    const connectionInfo = {
+      userId,
+      socketId,
+      connectedAt: new Date().toISOString(),
+      lastActivity: new Date().toISOString(),
+      messagesSent: 0,
+      messagesReceived: 0,
+      status: 'connected',
+      userAgent: socket.handshake.headers['user-agent'] || 'unknown',
+      ip: socket.handshake.address || 'unknown'
+    };
+    
+    this.connections.set(userId, connectionInfo);
+    logger.info('WebSocket', `User connected: ${userId}`, null, connectionInfo);
+    return connectionInfo;
+  }
+
+  updateActivity(userId) {
+    const connection = this.connections.get(userId);
+    if (connection) {
+      connection.lastActivity = new Date().toISOString();
+      this.connections.set(userId, connection);
+    }
+  }
+
+  incrementMessagesSent(userId) {
+    const connection = this.connections.get(userId);
+    if (connection) {
+      connection.messagesSent++;
+      this.updateActivity(userId);
+      this.messageStats.sent++;
+    }
+  }
+
+  incrementMessagesReceived(userId) {
+    const connection = this.connections.get(userId);
+    if (connection) {
+      connection.messagesReceived++;
+      this.updateActivity(userId);
+    }
+  }
+
+  removeConnection(userId) {
+    const connection = this.connections.get(userId);
+    if (connection) {
+      const duration = Date.now() - new Date(connection.connectedAt).getTime();
+      logger.info('WebSocket', `User disconnected: ${userId}`, null, {
+        ...connection,
+        sessionDuration: `${Math.round(duration / 1000)}s`
+      });
+      this.connections.delete(userId);
+    }
+  }
+
+  getConnectionInfo(userId) {
+    return this.connections.get(userId);
+  }
+
+  getAllConnections() {
+    return Array.from(this.connections.values());
+  }
+
+  getStats() {
+    return {
+      activeConnections: this.connections.size,
+      messageStats: this.messageStats,
+      connections: this.getAllConnections()
+    };
+  }
+}
+
+const connectionTracker = new ConnectionTracker();
+
+// Configuração do WebSocket com logging aprimorado
 io.on('connection', (socket) => {
-  console.log(`[WebSocket] Cliente conectado: ${socket.id}`);
+  const correlationId = logger.generateCorrelationId();
+  
+  logger.info('WebSocket', `Client connected: ${socket.id}`, correlationId, {
+    socketId: socket.id,
+    userAgent: socket.handshake.headers['user-agent'],
+    ip: socket.handshake.address
+  });
 
   // Registrar usuário
   socket.on('register', (userId) => {
+    const registerCorrelationId = logger.generateCorrelationId();
+    
     if (userId) {
+      // Remove previous connection if exists
+      if (connectedUsers.has(userId)) {
+        const oldSocketId = connectedUsers.get(userId);
+        logger.warn('WebSocket', `User ${userId} already connected, replacing connection`, registerCorrelationId, {
+          oldSocketId,
+          newSocketId: socket.id
+        });
+      }
+
       connectedUsers.set(userId, socket.id);
       socket.userId = userId;
-      console.log(`[WebSocket] Usuário ${userId} registrado com socket ${socket.id}`);
+      
+      // Track connection details
+      connectionTracker.addConnection(userId, socket.id, socket);
+      
+      logger.info('WebSocket', `User registered successfully: ${userId}`, registerCorrelationId, {
+        userId,
+        socketId: socket.id,
+        totalConnections: connectedUsers.size
+      });
       
       // Confirmar registro
-      socket.emit('registered', { userId, socketId: socket.id });
+      socket.emit('registered', { 
+        userId, 
+        socketId: socket.id,
+        correlationId: registerCorrelationId,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      logger.error('WebSocket', 'Registration failed: userId is required', registerCorrelationId, {
+        socketId: socket.id
+      });
+      socket.emit('registration_error', { 
+        error: 'userId is required',
+        correlationId: registerCorrelationId
+      });
+    }
+  });
+
+  // Handle heartbeat
+  socket.on('heartbeat', () => {
+    if (socket.userId) {
+      connectionTracker.updateActivity(socket.userId);
+      connectionTracker.incrementMessagesReceived(socket.userId);
+      socket.emit('heartbeat_ack', { timestamp: new Date().toISOString() });
+      logger.debug('WebSocket', `Heartbeat received from user: ${socket.userId}`, null, {
+        userId: socket.userId,
+        socketId: socket.id
+      });
+    }
+  });
+
+  // Handle message acknowledgment
+  socket.on('message_ack', (data) => {
+    if (socket.userId && data.messageId) {
+      connectionTracker.messageStats.acknowledged++;
+      logger.debug('WebSocket', `Message acknowledged: ${data.messageId}`, data.correlationId, {
+        userId: socket.userId,
+        messageId: data.messageId
+      });
     }
   });
 
   // Desconexão
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    const disconnectCorrelationId = logger.generateCorrelationId();
+    
     if (socket.userId) {
       connectedUsers.delete(socket.userId);
-      console.log(`[WebSocket] Usuário ${socket.userId} desconectado`);
+      connectionTracker.removeConnection(socket.userId);
+      
+      logger.info('WebSocket', `User disconnected: ${socket.userId}`, disconnectCorrelationId, {
+        userId: socket.userId,
+        socketId: socket.id,
+        reason,
+        remainingConnections: connectedUsers.size
+      });
+    } else {
+      logger.info('WebSocket', `Unregistered client disconnected: ${socket.id}`, disconnectCorrelationId, {
+        socketId: socket.id,
+        reason
+      });
     }
+  });
+
+  // Handle connection errors
+  socket.on('error', (error) => {
+    const errorCorrelationId = logger.generateCorrelationId();
+    logger.error('WebSocket', `Socket error for ${socket.userId || socket.id}`, errorCorrelationId, {
+      userId: socket.userId,
+      socketId: socket.id,
+      error: error.message,
+      stack: error.stack
+    });
   });
 });
 
-// Função para notificar usuário via WebSocket
-function notifyUser(userId, event, data) {
+// Enhanced function to notify user via WebSocket with delivery tracking
+function notifyUser(userId, event, data, correlationId = null) {
+  const notifyCorrelationId = correlationId || logger.generateCorrelationId();
   const socketId = connectedUsers.get(userId);
+  
   if (socketId) {
-    io.to(socketId).emit(event, data);
-    console.log(`[WebSocket] Evento '${event}' enviado para usuário ${userId}`);
-    return true;
+    try {
+      // Add correlation ID and timestamp to message
+      const enhancedData = {
+        ...data,
+        correlationId: notifyCorrelationId,
+        timestamp: new Date().toISOString(),
+        requiresAck: true
+      };
+
+      io.to(socketId).emit(event, enhancedData);
+      
+      connectionTracker.incrementMessagesSent(userId);
+      connectionTracker.messageStats.delivered++;
+      
+      logger.info('WebSocket', `Event '${event}' sent to user: ${userId}`, notifyCorrelationId, {
+        userId,
+        socketId,
+        event,
+        dataSize: JSON.stringify(data).length,
+        messageId: data.messageId || 'unknown'
+      });
+      
+      return { success: true, correlationId: notifyCorrelationId };
+    } catch (error) {
+      connectionTracker.messageStats.failed++;
+      logger.error('WebSocket', `Failed to send event '${event}' to user: ${userId}`, notifyCorrelationId, {
+        userId,
+        socketId,
+        event,
+        error: error.message
+      });
+      return { success: false, error: error.message, correlationId: notifyCorrelationId };
+    }
+  } else {
+    connectionTracker.messageStats.failed++;
+    logger.warn('WebSocket', `User not connected, cannot send event '${event}': ${userId}`, notifyCorrelationId, {
+      userId,
+      event,
+      totalConnectedUsers: connectedUsers.size
+    });
+    return { success: false, error: 'User not connected', correlationId: notifyCorrelationId };
   }
-  return false;
 }
 
 // Servir o frontend buildado
@@ -128,9 +404,11 @@ if (require('fs').existsSync(distPath)) {
   app.use(express.static(distPath));
 }
 
-// Health check
+// Health check with enhanced logging
 app.get('/api/health', (_req, res) => {
-  console.log('[Health] Health check solicitado');
+  const correlationId = logger.generateCorrelationId();
+  logger.info('Health', 'Health check requested', correlationId);
+  
   const healthData = {
     ok: true,
     status: 'alive',
@@ -140,56 +418,188 @@ app.get('/api/health', (_req, res) => {
     port: PORT,
     websocket: 'enabled',
     connectedUsers: connectedUsers.size,
-    supabase: SUPABASE_AVAILABLE ? 'disponível' : 'indisponível'
+    supabase: SUPABASE_AVAILABLE ? 'disponível' : 'indisponível',
+    correlationId
   };
-  console.log('[Health] Respondendo:', healthData);
+  
+  logger.info('Health', 'Health check response sent', correlationId, healthData);
   res.json(healthData);
+});
+
+// Enhanced debug endpoints for WebSocket monitoring
+app.get('/api/debug/websocket/connections', (_req, res) => {
+  const correlationId = logger.generateCorrelationId();
+  logger.info('Debug', 'WebSocket connections status requested', correlationId);
+  
+  const stats = connectionTracker.getStats();
+  const response = {
+    correlationId,
+    timestamp: new Date().toISOString(),
+    summary: {
+      totalConnections: stats.activeConnections,
+      messageStats: stats.messageStats
+    },
+    connections: stats.connections.map(conn => ({
+      userId: conn.userId,
+      socketId: conn.socketId,
+      connectedAt: conn.connectedAt,
+      lastActivity: conn.lastActivity,
+      messagesSent: conn.messagesSent,
+      messagesReceived: conn.messagesReceived,
+      status: conn.status,
+      sessionDuration: Math.round((Date.now() - new Date(conn.connectedAt).getTime()) / 1000) + 's',
+      userAgent: conn.userAgent,
+      ip: conn.ip
+    }))
+  };
+  
+  logger.info('Debug', 'WebSocket connections status sent', correlationId, {
+    totalConnections: stats.activeConnections,
+    requestedBy: _req.ip
+  });
+  
+  res.json(response);
+});
+
+app.get('/api/debug/websocket/user/:userId', (req, res) => {
+  const { userId } = req.params;
+  const correlationId = logger.generateCorrelationId();
+  
+  logger.info('Debug', `WebSocket user status requested: ${userId}`, correlationId);
+  
+  const connectionInfo = connectionTracker.getConnectionInfo(userId);
+  const isConnected = connectedUsers.has(userId);
+  
+  const response = {
+    correlationId,
+    timestamp: new Date().toISOString(),
+    userId,
+    isConnected,
+    socketId: connectedUsers.get(userId) || null,
+    connectionDetails: connectionInfo || null
+  };
+  
+  if (connectionInfo) {
+    response.sessionDuration = Math.round((Date.now() - new Date(connectionInfo.connectedAt).getTime()) / 1000) + 's';
+  }
+  
+  logger.info('Debug', `WebSocket user status sent: ${userId}`, correlationId, {
+    isConnected,
+    hasDetails: !!connectionInfo
+  });
+  
+  res.json(response);
+});
+
+app.get('/api/debug/websocket/stats', (_req, res) => {
+  const correlationId = logger.generateCorrelationId();
+  logger.info('Debug', 'WebSocket statistics requested', correlationId);
+  
+  const stats = connectionTracker.getStats();
+  const response = {
+    correlationId,
+    timestamp: new Date().toISOString(),
+    activeConnections: stats.activeConnections,
+    messageStats: stats.messageStats,
+    averageSessionDuration: stats.connections.length > 0 
+      ? Math.round(stats.connections.reduce((acc, conn) => {
+          return acc + (Date.now() - new Date(conn.connectedAt).getTime());
+        }, 0) / stats.connections.length / 1000) + 's'
+      : '0s',
+    connectionsByStatus: stats.connections.reduce((acc, conn) => {
+      acc[conn.status] = (acc[conn.status] || 0) + 1;
+      return acc;
+    }, {})
+  };
+  
+  logger.info('Debug', 'WebSocket statistics sent', correlationId, response);
+  res.json(response);
 });
 
 // Endpoint de debug para testar configuração
 app.get('/api/debug/webhook-config', (_req, res) => {
-  console.log('[Debug] Verificando configuração do webhook');
-  res.json({
+  const correlationId = logger.generateCorrelationId();
+  logger.info('Debug', 'Webhook configuration requested', correlationId);
+  
+  const response = {
+    correlationId,
     evolutionApiUrl: EVOLUTION_API_URL,
     evolutionApiKey: EVOLUTION_API_KEY ? '***configurada***' : 'não configurada',
     supabaseAvailable: SUPABASE_AVAILABLE,
     connectedUsers: connectedUsers.size,
     webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'não configurada (usando request host)',
     timestamp: new Date().toISOString()
+  };
+  
+  logger.info('Debug', 'Webhook configuration sent', correlationId, response);
+  res.json(response);
+});
+
+// Logging middleware for all API requests
+app.use('/api', (req, res, next) => {
+  const correlationId = logger.generateCorrelationId();
+  req.correlationId = correlationId;
+  
+  logger.info('API', `${req.method} ${req.path}`, correlationId, {
+    method: req.method,
+    path: req.path,
+    userAgent: req.headers['user-agent'],
+    ip: req.ip,
+    contentLength: req.headers['content-length'] || 0
   });
+  
+  // Override res.json to log responses
+  const originalJson = res.json;
+  res.json = function(data) {
+    logger.info('API', `Response ${req.method} ${req.path} - ${res.statusCode}`, correlationId, {
+      statusCode: res.statusCode,
+      responseSize: JSON.stringify(data).length
+    });
+    return originalJson.call(this, data);
+  };
+  
+  next();
 });
 
 // Endpoint simples para testar comunicação
-app.get('/api/test/ping', (_req, res) => {
-  console.log('[Test] Ping recebido');
+app.get('/api/test/ping', (req, res) => {
+  const correlationId = req.correlationId || logger.generateCorrelationId();
+  logger.info('Test', 'Ping received', correlationId);
+  
   res.json({
     success: true,
     message: 'Pong! Servidor funcionando',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    correlationId
   });
 });
 
 // Endpoint para testar conexão com Evolution API
-app.get('/api/debug/test-evolution', async (_req, res) => {
-  console.log('[Debug] Testando conexão com Evolution API');
+app.get('/api/debug/test-evolution', async (req, res) => {
+  const correlationId = req.correlationId || logger.generateCorrelationId();
+  logger.info('Debug', 'Testing Evolution API connection', correlationId);
 
   if (!EVOLUTION_API_URL) {
+    logger.error('Debug', 'EVOLUTION_API_URL not configured', correlationId);
     return res.status(500).json({
       success: false,
-      error: 'EVOLUTION_API_URL não configurado no backend'
+      error: 'EVOLUTION_API_URL não configurado no backend',
+      correlationId
     });
   }
 
   if (!EVOLUTION_API_KEY) {
+    logger.error('Debug', 'EVOLUTION_API_KEY not configured', correlationId);
     return res.status(500).json({
       success: false,
-      error: 'EVOLUTION_API_KEY não configurado no backend'
+      error: 'EVOLUTION_API_KEY não configurado no backend',
+      correlationId
     });
   }
 
   try {
     const testUrl = `${EVOLUTION_API_URL}/manager/findInstances`;
-    console.log(`[Debug] Testando URL: ${testUrl}`);
+    logger.debug('Debug', `Testing Evolution API URL: ${testUrl}`, correlationId);
 
     const response = await fetch(testUrl, {
       method: 'GET',
@@ -202,38 +612,60 @@ app.get('/api/debug/test-evolution', async (_req, res) => {
       },
     });
 
-    console.log(`[Debug] Resposta: ${response.status} ${response.statusText}`);
+    logger.info('Debug', `Evolution API response: ${response.status} ${response.statusText}`, correlationId, {
+      status: response.status,
+      statusText: response.statusText,
+      url: testUrl
+    });
 
     if (response.ok) {
       const data = await response.json().catch(() => null);
+      logger.info('Debug', 'Evolution API connection successful', correlationId);
       res.json({
         success: true,
         message: 'Conexão com Evolution API estabelecida com sucesso',
         status: response.status,
-        data: data
+        data: data,
+        correlationId
       });
     } else {
       const errorText = await response.text().catch(() => '');
+      logger.error('Debug', `Evolution API returned error status: ${response.status}`, correlationId, {
+        status: response.status,
+        errorText
+      });
       res.status(response.status).json({
         success: false,
         error: `Evolution API retornou status ${response.status}`,
-        details: errorText
+        details: errorText,
+        correlationId
       });
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('[Debug] Erro ao testar Evolution API:', msg);
+    logger.error('Debug', 'Failed to connect to Evolution API', correlationId, {
+      error: msg,
+      stack: error instanceof Error ? error.stack : undefined
+    });
     res.status(502).json({
       success: false,
-      error: `Erro ao conectar com Evolution API: ${msg}`
+      error: `Erro ao conectar com Evolution API: ${msg}`,
+      correlationId
     });
   }
 });
 
-// Webhook para receber eventos da Evolution API
+// Webhook para receber eventos da Evolution API com logging aprimorado
 app.post('/api/whatsapp/webhook', async (req, res) => {
+  const correlationId = logger.generateCorrelationId();
+  
   if (!supabaseAdmin) {
-    return res.status(200).json({ ok: true, warning: 'Supabase desabilitado no backend.' });
+    logger.warn('Webhook', 'Supabase disabled, webhook processing skipped', correlationId);
+    return res.status(200).json({ 
+      ok: true, 
+      warning: 'Supabase desabilitado no backend.',
+      correlationId 
+    });
   }
 
   try {
@@ -246,14 +678,35 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       payload?.uid || payload?.user_id || payload?.userId
     );
 
-    console.log(`[Webhook] Evento recebido: ${eventType} para instância ${instanceName} do usuário ${ownerUserId}`);
+    logger.info('Webhook', `Event received: ${eventType}`, correlationId, {
+      eventType,
+      instanceName,
+      ownerUserId,
+      payloadSize: JSON.stringify(payload).length,
+      userAgent: req.headers['user-agent'],
+      ip: req.ip
+    });
 
     if (!ownerUserId) {
-      console.error(`[Webhook] Erro crítico: user_id não encontrado para o evento da instância '${instanceName}'.`);
-      return res.status(400).json({ error: 'x-user-id header ou uid query é obrigatório' });
+      logger.error('Webhook', `Critical error: user_id not found for instance '${instanceName}'`, correlationId, {
+        instanceName,
+        eventType,
+        headers: Object.keys(req.headers),
+        query: req.query
+      });
+      return res.status(400).json({ 
+        error: 'x-user-id header ou uid query é obrigatório',
+        correlationId 
+      });
     }
 
     if (eventType === 'connection.update') {
+      logger.debug('Webhook', 'Processing connection.update event', correlationId, {
+        instanceName,
+        ownerUserId,
+        state: payload.data?.state
+      });
+
       // Verificar status atual antes de atualizar
       const { data: currentConnection } = await supabaseAdmin
         .from('connections')
@@ -264,8 +717,16 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
       // Se a conexão está pausada, não atualizar o status
       if (currentConnection?.status === 'PAUSED') {
-        console.log(`[Webhook] Conexão '${instanceName}' está pausada, ignorando atualização de status`);
-        return res.status(200).json({ ok: true, message: 'Status ignorado - conexão pausada' });
+        logger.info('Webhook', `Connection '${instanceName}' is paused, ignoring status update`, correlationId, {
+          instanceName,
+          ownerUserId,
+          currentStatus: 'PAUSED'
+        });
+        return res.status(200).json({ 
+          ok: true, 
+          message: 'Status ignorado - conexão pausada',
+          correlationId 
+        });
       }
 
       const statusMap = {
@@ -284,19 +745,51 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           .eq('user_id', ownerUserId);
         
         if (error) {
-          console.error(`[Webhook] Erro ao atualizar status da conexão '${instanceName}':`, error.message);
+          logger.error('Webhook', `Failed to update connection status for '${instanceName}'`, correlationId, {
+            instanceName,
+            ownerUserId,
+            newStatus,
+            error: error.message
+          });
         } else {
+          logger.info('Webhook', `Connection status updated: ${instanceName} -> ${newStatus}`, correlationId, {
+            instanceName,
+            ownerUserId,
+            oldStatus: currentConnection?.status,
+            newStatus
+          });
+
           // Notificar via WebSocket
-          notifyUser(ownerUserId, 'connection_update', {
+          const notifyResult = notifyUser(ownerUserId, 'connection_update', {
             instanceName,
             status: newStatus,
             data: payload.data
-          });
+          }, correlationId);
+
+          if (!notifyResult.success) {
+            logger.warn('Webhook', 'Failed to notify user of connection update', correlationId, {
+              instanceName,
+              ownerUserId,
+              error: notifyResult.error
+            });
+          }
         }
+      } else {
+        logger.debug('Webhook', `Connection status unchanged for '${instanceName}': ${newStatus}`, correlationId, {
+          instanceName,
+          ownerUserId,
+          status: newStatus
+        });
       }
     }
 
     else if (eventType === 'qrcode.updated') {
+      logger.debug('Webhook', 'Processing qrcode.updated event', correlationId, {
+        instanceName,
+        ownerUserId,
+        hasQrCode: !!payload.data?.qrcode
+      });
+
       const { error } = await supabaseAdmin
         .from('connections')
         .update({ status: 'WAITING_QR_CODE' })
@@ -304,30 +797,59 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         .eq('user_id', ownerUserId);
       
       if (error) {
-        console.error(`[Webhook] Erro ao atualizar status para WAITING_QR_CODE na instância '${instanceName}':`, error.message);
+        logger.error('Webhook', `Failed to update status to WAITING_QR_CODE for '${instanceName}'`, correlationId, {
+          instanceName,
+          ownerUserId,
+          error: error.message
+        });
       } else {
+        logger.info('Webhook', `QR Code status updated for '${instanceName}'`, correlationId, {
+          instanceName,
+          ownerUserId
+        });
+
         // Notificar via WebSocket
-        notifyUser(ownerUserId, 'qrcode_update', {
+        const notifyResult = notifyUser(ownerUserId, 'qrcode_update', {
           instanceName,
           qrcode: payload.data?.qrcode
-        });
+        }, correlationId);
+
+        if (!notifyResult.success) {
+          logger.warn('Webhook', 'Failed to notify user of QR code update', correlationId, {
+            instanceName,
+            ownerUserId,
+            error: notifyResult.error
+          });
+        }
       }
     }
 
     else if (eventType === 'messages.upsert') {
       const messages = payload.data.messages || [];
-      console.log(`[Webhook] Processando ${messages.length} mensagens`);
+      logger.info('Webhook', `Processing ${messages.length} messages`, correlationId, {
+        instanceName,
+        ownerUserId,
+        messageCount: messages.length
+      });
       
-      for (const msg of messages) {
+      for (const [index, msg] of messages.entries()) {
+        const messageCorrelationId = `${correlationId}-msg-${index}`;
         const key = msg.key || {};
+        
         if (key.fromMe) {
-          console.log(`[Webhook] Ignorando mensagem própria: ${key.id}`);
+          logger.debug('Webhook', `Ignoring own message: ${key.id}`, messageCorrelationId, {
+            messageId: key.id,
+            ownerUserId
+          });
           continue;
         }
 
         const remoteJid = key.remoteJid || '';
         if (!remoteJid || remoteJid.endsWith('@g.us')) {
-          console.log(`[Webhook] Ignorando mensagem de grupo: ${remoteJid}`);
+          logger.debug('Webhook', `Ignoring group message: ${remoteJid}`, messageCorrelationId, {
+            remoteJid,
+            ownerUserId
+          });
           continue;
         }
 
@@ -363,11 +885,23 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         const pushName = msg.pushName || phone;
 
         if (!phone || !messageContent) {
-          console.log(`[Webhook] Dados insuficientes para processar mensagem: phone=${phone}, content=${messageContent}`);
+          logger.warn('Webhook', 'Insufficient data to process message', messageCorrelationId, {
+            phone,
+            hasContent: !!messageContent,
+            messageId: key.id,
+            ownerUserId
+          });
           continue;
         }
 
-        console.log(`[Webhook] Processando mensagem de ${pushName} (${phone}): ${messageContent.substring(0, 50)}...`);
+        logger.info('Webhook', `Processing message from ${pushName} (${phone})`, messageCorrelationId, {
+          phone,
+          pushName,
+          messageType,
+          contentLength: messageContent.length,
+          messageId: key.id,
+          ownerUserId
+        });
 
         try {
           // Criar ou atualizar contato
@@ -384,9 +918,20 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             .single();
           
           if (contactError) {
-            console.error(`[Webhook] Erro ao salvar contato ${phone}:`, contactError.message);
+            logger.error('Webhook', `Failed to save contact ${phone}`, messageCorrelationId, {
+              phone,
+              pushName,
+              ownerUserId,
+              error: contactError.message
+            });
             continue;
           }
+
+          logger.debug('Webhook', `Contact saved/updated: ${phone}`, messageCorrelationId, {
+            contactId: contact.id,
+            phone,
+            pushName
+          });
 
           // Buscar conexão
           const { data: connection } = await supabaseAdmin
@@ -412,9 +957,20 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             .single();
           
           if (convError) {
-            console.error(`[Webhook] Erro ao salvar conversa para ${phone}:`, convError.message);
+            logger.error('Webhook', `Failed to save conversation for ${phone}`, messageCorrelationId, {
+              phone,
+              contactId: contact.id,
+              ownerUserId,
+              error: convError.message
+            });
             continue;
           }
+
+          logger.debug('Webhook', `Conversation saved/updated: ${phone}`, messageCorrelationId, {
+            conversationId: conversation.id,
+            contactId: contact.id,
+            status: 'pending'
+          });
 
           // Inserir mensagem
           const { error: msgError } = await supabaseAdmin
@@ -429,14 +985,31 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             });
           
           if (msgError && msgError.code !== '23505') { // Ignora erro de ID duplicado
-            console.error(`[Webhook] Erro ao inserir mensagem ${key.id}:`, msgError.message);
+            logger.error('Webhook', `Failed to insert message ${key.id}`, messageCorrelationId, {
+              messageId: key.id,
+              conversationId: conversation.id,
+              ownerUserId,
+              error: msgError.message
+            });
+            continue;
+          } else if (msgError && msgError.code === '23505') {
+            logger.debug('Webhook', `Duplicate message ignored: ${key.id}`, messageCorrelationId, {
+              messageId: key.id,
+              ownerUserId
+            });
             continue;
           }
 
-          console.log(`[Webhook] ✅ Mensagem processada com sucesso: ${key.id}`);
+          logger.info('Webhook', `Message processed successfully: ${key.id}`, messageCorrelationId, {
+            messageId: key.id,
+            conversationId: conversation.id,
+            contactId: contact.id,
+            phone,
+            messageType
+          });
 
           // Notificar via WebSocket em tempo real
-          const notified = notifyUser(ownerUserId, 'new_message', {
+          const notifyResult = notifyUser(ownerUserId, 'new_message', {
             conversationId: conversation.id,
             contactId: contact.id,
             contactName: pushName,
@@ -445,25 +1018,58 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             content: messageContent,
             messageType: messageType,
             timestamp: new Date().toISOString()
-          });
+          }, messageCorrelationId);
 
-          if (notified) {
-            console.log(`[Webhook] ✅ Notificação WebSocket enviada para usuário ${ownerUserId}`);
+          if (notifyResult.success) {
+            logger.info('Webhook', `WebSocket notification sent successfully to user ${ownerUserId}`, messageCorrelationId, {
+              ownerUserId,
+              messageId: key.id,
+              notificationCorrelationId: notifyResult.correlationId
+            });
           } else {
-            console.log(`[Webhook] ⚠️ Usuário ${ownerUserId} não está conectado via WebSocket`);
+            logger.warn('Webhook', `Failed to send WebSocket notification to user ${ownerUserId}`, messageCorrelationId, {
+              ownerUserId,
+              messageId: key.id,
+              error: notifyResult.error
+            });
           }
 
         } catch (error) {
-          console.error(`[Webhook] Erro ao processar mensagem ${key.id}:`, error.message);
+          logger.error('Webhook', `Fatal error processing message ${key.id}`, messageCorrelationId, {
+            messageId: key.id,
+            ownerUserId,
+            phone,
+            error: error.message,
+            stack: error.stack
+          });
         }
       }
     }
 
-    res.status(200).json({ ok: true });
+    logger.info('Webhook', 'Event processing completed successfully', correlationId, {
+      eventType,
+      instanceName,
+      ownerUserId
+    });
+
+    res.status(200).json({ 
+      ok: true,
+      correlationId,
+      timestamp: new Date().toISOString()
+    });
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
-    console.error('[Webhook] Erro fatal no processamento:', errorMessage);
-    res.status(500).json({ error: errorMessage });
+    logger.error('Webhook', 'Fatal error in webhook processing', correlationId, {
+      error: errorMessage,
+      stack: e instanceof Error ? e.stack : undefined,
+      eventType: req.body?.event,
+      instanceName: req.body?.instance
+    });
+    res.status(500).json({ 
+      error: errorMessage,
+      correlationId,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
@@ -471,19 +1077,32 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
   const { instanceName } = req.params;
   const userId = req.headers['x-user-id'] || req.body.userId;
+  const correlationId = req.correlationId || logger.generateCorrelationId();
   
-  console.log(`[Setup] Iniciando configuração de webhook para instância: ${instanceName}, userId: ${userId}`);
+  logger.info('Setup', `Starting webhook configuration for instance: ${instanceName}`, correlationId, {
+    instanceName,
+    userId
+  });
   
   if (!userId) {
-    console.error('[Setup] ❌ userId não fornecido');
-    return res.status(400).json({ error: 'userId é obrigatório' });
+    logger.error('Setup', 'userId not provided', correlationId, { instanceName });
+    return res.status(400).json({ 
+      error: 'userId é obrigatório',
+      correlationId 
+    });
   }
 
   if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-    console.error('[Setup] ❌ Evolution API não configurada');
-    console.error(`[Setup] EVOLUTION_API_URL: ${EVOLUTION_API_URL ? 'OK' : 'MISSING'}`);
-    console.error(`[Setup] EVOLUTION_API_KEY: ${EVOLUTION_API_KEY ? 'OK' : 'MISSING'}`);
-    return res.status(500).json({ error: 'Evolution API não configurada no servidor' });
+    logger.error('Setup', 'Evolution API not configured', correlationId, {
+      hasUrl: !!EVOLUTION_API_URL,
+      hasKey: !!EVOLUTION_API_KEY,
+      instanceName,
+      userId
+    });
+    return res.status(500).json({ 
+      error: 'Evolution API não configurada no servidor',
+      correlationId 
+    });
   }
 
   try {
@@ -502,13 +1121,19 @@ app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
       }
     };
 
-    console.log(`[Setup] Configurando webhook para ${instanceName}:`);
-    console.log(`[Setup] URL do webhook: ${webhookUrl}`);
-    console.log(`[Setup] Evolution API URL: ${EVOLUTION_API_URL}`);
-    console.log(`[Setup] Config do webhook:`, JSON.stringify(webhookConfig, null, 2));
+    logger.info('Setup', `Configuring webhook for ${instanceName}`, correlationId, {
+      instanceName,
+      userId,
+      webhookUrl,
+      evolutionApiUrl: EVOLUTION_API_URL,
+      events: webhookConfig.webhook.events
+    });
 
     const targetUrl = `${EVOLUTION_API_URL}/webhook/set/${instanceName}`;
-    console.log(`[Setup] Fazendo requisição para: ${targetUrl}`);
+    logger.debug('Setup', `Making request to: ${targetUrl}`, correlationId, {
+      targetUrl,
+      method: 'POST'
+    });
 
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -521,52 +1146,83 @@ app.post('/api/whatsapp/setup-webhook/:instanceName', async (req, res) => {
       body: JSON.stringify(webhookConfig)
     });
 
-    console.log(`[Setup] Resposta da Evolution API: ${response.status} ${response.statusText}`);
+    logger.info('Setup', `Evolution API response: ${response.status} ${response.statusText}`, correlationId, {
+      status: response.status,
+      statusText: response.statusText,
+      instanceName
+    });
 
     if (response.ok) {
       const data = await response.json().catch(() => null);
-      console.log(`[Setup] ✅ Webhook configurado com sucesso para ${instanceName}`);
-      console.log(`[Setup] Dados da resposta:`, data);
+      logger.info('Setup', `Webhook configured successfully for ${instanceName}`, correlationId, {
+        instanceName,
+        userId,
+        webhookUrl,
+        responseData: data
+      });
       res.json({ 
         success: true, 
         message: 'Webhook configurado com sucesso',
         webhookUrl,
         instanceName,
-        data 
+        data,
+        correlationId
       });
     } else {
       const errorText = await response.text().catch(() => 'Erro desconhecido');
-      console.error(`[Setup] ❌ Erro ao configurar webhook: ${response.status} ${response.statusText}`);
-      console.error(`[Setup] Detalhes do erro:`, errorText);
+      logger.error('Setup', `Failed to configure webhook: ${response.status} ${response.statusText}`, correlationId, {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        instanceName,
+        userId
+      });
       res.status(response.status).json({ 
         error: `Erro ao configurar webhook: ${response.status} - ${response.statusText}`,
         details: errorText,
         instanceName,
-        webhookUrl
+        webhookUrl,
+        correlationId
       });
     }
   } catch (error) {
-    console.error('[Setup] ❌ Erro fatal ao configurar webhook:', error);
+    logger.error('Setup', 'Fatal error configuring webhook', correlationId, {
+      error: error.message,
+      stack: error.stack,
+      instanceName,
+      userId
+    });
     res.status(500).json({ 
       error: error.message,
       instanceName,
-      stack: error.stack
+      correlationId
     });
   }
 });
 
 // Proxy para Evolution API
 app.all('/api/evolution/*', async (req, res) => {
-  console.log(`[Proxy] ${req.method} ${req.path} -> ${EVOLUTION_API_URL}`);
+  const correlationId = req.correlationId || logger.generateCorrelationId();
+  logger.info('Proxy', `${req.method} ${req.path} -> Evolution API`, correlationId, {
+    method: req.method,
+    path: req.path,
+    targetUrl: EVOLUTION_API_URL
+  });
 
   if (!EVOLUTION_API_URL) {
-    console.error('[Proxy] EVOLUTION_API_URL não configurado');
-    return res.status(500).json({ error: 'EVOLUTION_API_URL não configurado no backend.' });
+    logger.error('Proxy', 'EVOLUTION_API_URL not configured', correlationId);
+    return res.status(500).json({ 
+      error: 'EVOLUTION_API_URL não configurado no backend.',
+      correlationId 
+    });
   }
 
   if (!EVOLUTION_API_KEY) {
-    console.error('[Proxy] EVOLUTION_API_KEY não configurado');
-    return res.status(500).json({ error: 'EVOLUTION_API_KEY não configurado no backend.' });
+    logger.error('Proxy', 'EVOLUTION_API_KEY not configured', correlationId);
+    return res.status(500).json({ 
+      error: 'EVOLUTION_API_KEY não configurado no backend.',
+      correlationId 
+    });
   }
 
   const path = req.path.replace('/api/evolution', '');
@@ -583,6 +1239,12 @@ app.all('/api/evolution/*', async (req, res) => {
   };
 
   try {
+    logger.debug('Proxy', `Forwarding to: ${targetUrl}`, correlationId, {
+      targetUrl,
+      method: req.method,
+      hasBody: !!(req.body && Object.keys(req.body).length)
+    });
+
     const resp = await fetch(targetUrl, {
       method: req.method,
       headers,
@@ -591,6 +1253,12 @@ app.all('/api/evolution/*', async (req, res) => {
 
     const contentType = resp.headers.get('content-type') || '';
     const status = resp.status;
+
+    logger.info('Proxy', `Evolution API response: ${status}`, correlationId, {
+      status,
+      contentType,
+      targetUrl
+    });
 
     if (contentType.includes('application/json')) {
       const json = await resp.json().catch(() => null);
@@ -601,8 +1269,16 @@ app.all('/api/evolution/*', async (req, res) => {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[Proxy Evolution] Erro ao encaminhar:', msg);
-    res.status(502).json({ error: `Erro no proxy: ${msg}` });
+    logger.error('Proxy', 'Failed to forward request to Evolution API', correlationId, {
+      error: msg,
+      targetUrl,
+      method: req.method,
+      stack: e instanceof Error ? e.stack : undefined
+    });
+    res.status(502).json({ 
+      error: `Erro no proxy: ${msg}`,
+      correlationId 
+    });
   }
 });
 
@@ -616,20 +1292,46 @@ app.get('*', (req, res, next) => {
   }
 });
 
-// Middleware de tratamento de erros
+// Enhanced error handling middleware
 app.use((err, req, res, next) => {
-  console.error('[Error Handler] Erro não tratado:', err);
+  const correlationId = req.correlationId || logger.generateCorrelationId();
+  
+  logger.error('ErrorHandler', 'Unhandled error', correlationId, {
+    error: err.message,
+    stack: err.stack,
+    method: req.method,
+    path: req.path,
+    userAgent: req.headers['user-agent'],
+    ip: req.ip
+  });
+  
   res.status(500).json({
     error: 'Erro interno do servidor',
     message: err.message,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    correlationId
   });
 });
 
 server.listen(PORT, () => {
+  const startupCorrelationId = logger.generateCorrelationId();
+  
+  logger.info('Server', `Backend WebSocket server started on http://localhost:${PORT}`, startupCorrelationId, {
+    port: PORT,
+    evolutionApiUrl: EVOLUTION_API_URL || 'NOT_CONFIGURED',
+    evolutionApiKey: EVOLUTION_API_KEY ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    supabase: SUPABASE_AVAILABLE ? 'AVAILABLE' : 'DISABLED',
+    websocket: 'ENABLED',
+    logLevel: logger.logLevel,
+    nodeEnv: process.env.NODE_ENV || 'development'
+  });
+
+  // Log startup configuration
   console.log(`\x1b[32m[OK]\x1b[0m Backend WebSocket server rodando em http://localhost:${PORT}`);
-  console.log(`[Config] Evolution API URL: ${EVOLUTION_API_URL}`);
+  console.log(`[Config] Evolution API URL: ${EVOLUTION_API_URL || 'NÃO CONFIGURADA'}`);
   console.log(`[Config] Evolution API Key: ${EVOLUTION_API_KEY ? 'Configurada' : 'NÃO CONFIGURADA'}`);
   console.log(`[Config] Supabase: ${SUPABASE_AVAILABLE ? 'Disponível' : 'Desabilitado'}`);
   console.log(`[Config] WebSocket: Habilitado`);
+  console.log(`[Config] Log Level: ${logger.logLevel.toUpperCase()}`);
+  console.log(`[Config] Startup Correlation ID: ${startupCorrelationId}`);
 });
