@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Search, User, Loader2, AlertTriangle, Ticket } from 'lucide-react';
+import { Search, User, Loader2, AlertTriangle, Ticket, RefreshCw, CheckCircle, Info } from 'lucide-react';
 import { Tabs, TabsTrigger } from '@/components/ui/Tabs';
 import Button from '@/components/ui/Button';
 import { Conversation, ConversationStatus } from '@/types/database';
 import { cn } from '@/lib/utils';
+import SyncStatus from '@/components/ui/SyncStatus';
 
 type ConversationWithLastMessage = Conversation & {
   lastMessage?: {
@@ -23,6 +24,9 @@ interface ConversationListProps {
   activeFilter: ConversationStatus;
   onFilterChange: (status: ConversationStatus) => void;
   unreadCounts?: Record<string, number>;
+  onManualSync?: () => void;
+  lastSyncTime?: Date | null;
+  syncError?: string | null;
 }
 
 const ConversationList: React.FC<ConversationListProps> = ({
@@ -33,7 +37,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
   loading,
   activeFilter,
   onFilterChange,
-  unreadCounts = {}
+  unreadCounts = {},
+  onManualSync,
+  lastSyncTime,
+  syncError
 }) => {
 
   const getFilterCounts = () => {
@@ -66,6 +73,19 @@ const ConversationList: React.FC<ConversationListProps> = ({
   return (
     <div className="w-full md:w-[380px] border-r flex flex-col bg-card">
       <div className="p-4 border-b">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Conversas</h2>
+          {onManualSync && (
+            <SyncStatus
+              isLoading={loading}
+              lastSyncTime={lastSyncTime || undefined}
+              error={syncError}
+              onManualSync={onManualSync}
+              showLastSync={false}
+            />
+          )}
+        </div>
+        
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <input
@@ -105,11 +125,52 @@ const ConversationList: React.FC<ConversationListProps> = ({
           <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
         ) : filteredConversations.length === 0 ? (
             <div className="text-center py-10 px-4">
-              <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-4 typography-h4">Nenhuma conversa encontrada</h3>
-              <p className="mt-2 typography-body typography-muted">
-                {searchTerm ? `Nenhum resultado para "${searchTerm}".` : `Não há conversas com o status "${activeFilter}".`}
-              </p>
+              {searchTerm ? (
+                <>
+                  <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
+                  <h3 className="mt-4 typography-h4">Nenhum resultado encontrado</h3>
+                  <p className="mt-2 typography-body typography-muted">
+                    Nenhuma conversa corresponde ao termo "{searchTerm}".
+                  </p>
+                </>
+              ) : syncError ? (
+                <>
+                  <AlertTriangle className="mx-auto h-12 w-12 text-red-500" />
+                  <h3 className="mt-4 typography-h4 text-red-600 dark:text-red-400">Erro na sincronização</h3>
+                  <p className="mt-2 typography-body typography-muted">
+                    {syncError}
+                  </p>
+                  {onManualSync && (
+                    <Button 
+                      onClick={onManualSync} 
+                      className="mt-4"
+                      variant="outline"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Tentar novamente
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Info className="mx-auto h-12 w-12 text-muted-foreground" />
+                  <h3 className="mt-4 typography-h4">Nenhuma conversa {activeFilter === 'pending' ? 'pendente' : activeFilter === 'active' ? 'ativa' : 'resolvida'}</h3>
+                  <p className="mt-2 typography-body typography-muted">
+                    {activeFilter === 'pending' && 'Novas conversas aparecerão aqui quando chegarem mensagens.'}
+                    {activeFilter === 'active' && 'Conversas ativas aparecerão aqui quando forem abertas.'}
+                    {activeFilter === 'resolved' && 'Conversas resolvidas aparecerão aqui quando forem finalizadas.'}
+                  </p>
+                  {lastSyncTime && (
+                    <div className="mt-4 text-xs text-muted-foreground">
+                      <CheckCircle className="inline w-3 h-3 mr-1" />
+                      Última sincronização: {lastSyncTime.toLocaleTimeString('pt-BR', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
         ) : (
           filteredConversations.map(convo => {

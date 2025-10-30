@@ -92,6 +92,41 @@ export const dbClient = {
       if (error) throw error;
       return data as Conversation;
     },
+    async sync(lastSyncTimestamp?: string, limit?: number): Promise<{
+      conversations: Conversation[];
+      syncTimestamp: string;
+      totalFound: number;
+      hasMore: boolean;
+    }> {
+      const userId = await getUserId();
+      const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
+      
+      const response = await fetch(`${BASE_URL}/api/sync/conversations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({
+          userId,
+          lastSyncTimestamp,
+          limit: limit || 50
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro na sincronização: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        conversations: data.conversations || [],
+        syncTimestamp: data.syncTimestamp,
+        totalFound: data.totalFound || 0,
+        hasMore: data.hasMore || false
+      };
+    },
   },
   messages: {
     async listByConversation(conversationId: string): Promise<Message[]> {
@@ -118,6 +153,41 @@ export const dbClient = {
       // Trigger update on conversation
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', payload.conversation_id);
       return data as Message;
+    },
+    async sync(conversationId: string, lastSyncTimestamp?: string, limit?: number): Promise<{
+      messages: Message[];
+      syncTimestamp: string;
+      totalFound: number;
+      hasMore: boolean;
+    }> {
+      const userId = await getUserId();
+      const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) || window.location.origin;
+      
+      const response = await fetch(`${BASE_URL}/api/sync/messages/${conversationId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({
+          userId,
+          lastSyncTimestamp,
+          limit: limit || 100
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro na sincronização de mensagens: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        messages: data.messages || [],
+        syncTimestamp: data.syncTimestamp,
+        totalFound: data.totalFound || 0,
+        hasMore: data.hasMore || false
+      };
     },
   },
   quickResponses: {

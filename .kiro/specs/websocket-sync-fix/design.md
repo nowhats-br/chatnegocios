@@ -1,10 +1,10 @@
-# Design Document - WebSocket Sync Fix
+# Documento de Design - Correção de Sincronização WebSocket
 
-## Overview
+## Visão Geral
 
 O sistema atual possui uma arquitetura WebSocket funcional, mas apresenta falhas na sincronização de conversas. O problema principal é que mensagens chegam no dispositivo móvel via webhook, mas não são propagadas corretamente para o cliente web via WebSocket, resultando na mensagem "Nenhuma conversa encontrada para sincronizar".
 
-### Current Architecture Analysis
+### Análise da Arquitetura Atual
 
 **Componentes Existentes:**
 - `useWebSocket.ts`: Hook React para gerenciar conexão WebSocket
@@ -18,9 +18,9 @@ O sistema atual possui uma arquitetura WebSocket funcional, mas apresenta falhas
 3. Servidor emite evento WebSocket `new_message`
 4. Cliente recebe evento mas não atualiza UI consistentemente
 
-## Architecture
+## Arquitetura
 
-### WebSocket Communication Flow
+### Fluxo de Comunicação WebSocket
 
 ```mermaid
 sequenceDiagram
@@ -40,7 +40,7 @@ sequenceDiagram
     UI->>UI: Mostrar notificação
 ```
 
-### Connection Management
+### Gerenciamento de Conexão
 
 ```mermaid
 stateDiagram-v2
@@ -57,17 +57,17 @@ stateDiagram-v2
     Error --> Disconnected: Give up
 ```
 
-## Components and Interfaces
+## Componentes e Interfaces
 
-### Enhanced WebSocket Hook
+### Hook WebSocket Aprimorado
 
-**Current Issues:**
-- Callback management is complex with useState
-- No heartbeat mechanism
-- Limited error recovery
-- No connection quality monitoring
+**Problemas Atuais:**
+- Gerenciamento de callbacks é complexo com useState
+- Não há mecanismo de heartbeat
+- Recuperação de erro limitada
+- Não há monitoramento de qualidade de conexão
 
-**Proposed Improvements:**
+**Melhorias Propostas:**
 ```typescript
 interface WebSocketState {
   isConnected: boolean;

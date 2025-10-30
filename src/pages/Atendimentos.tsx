@@ -18,16 +18,24 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { Conversation, ConversationStatus, Message } from '@/types/database';
+import { Conversation, ConversationStatus, Message, MessageType } from '@/types/database';
 import { dbClient } from '@/lib/dbClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import ConnectionStatus from '@/components/ui/ConnectionStatus';
+import SyncStatus from '@/components/ui/SyncStatus';
 
 import { cn } from '@/lib/utils';
 
 interface ConversationWithDetails extends Conversation {
-  lastMessage?: Message;
+  lastMessage?: {
+    id: string;
+    content: string | null;
+    created_at: string;
+    sender_is_user: boolean;
+    message_type: MessageType;
+  };
   unreadCount?: number;
   contact?: {
     id: string;
@@ -46,40 +54,118 @@ export default function Atendimentos() {
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [showHistoryDetails, setShowHistoryDetails] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   
   const { user } = useAuth();
   const { permission, showNotification, playNotificationSound } = useNotifications();
   const { 
+    isConnected,
+    connectionQuality,
+    lastHeartbeat,
+    reconnectionState,
+    forceReconnect,
     setOnNewMessage,
-    setOnConnectionUpdate 
+    setOnConnectionUpdate,
+    setOnSyncComplete,
+    requestSync
   } = useWebSocket();
 
-  const fetchConversations = useCallback(async () => {
+  // Enhanced conversation fetching with sync support
+  const fetchConversations = useCallback(async (useSync = false, lastSyncTimestamp?: string) => {
     setLoading(true);
+    setSyncError(null);
+    
     try {
-      const data = await dbClient.conversations.listWithContact();
+      let data: ConversationWithDetails[];
       
-      const conversationsWithDetails = await Promise.all(
-        data.map(async (conv) => {
-          try {
-            const messages = await dbClient.messages.listByConversation(conv.id);
-            const lastMessage = messages[messages.length - 1];
-            const unreadCount = messages.filter(m => !m.sender_is_user && !m.internal_message).length;
+      if (useSync) {
+        // Use the new sync endpoint for efficient updates
+        const syncResult = await dbClient.conversations.sync(lastSyncTimestamp);
+        data = syncResult.conversations.map(conv => ({
+          ...conv,
+          lastMessage: (conv as any).lastMessage || undefined,
+          unreadCount: (conv as any).unreadCount || 0
+        }));
+        
+        console.log('[Sync] Conversations synced:', {
+          found: syncResult.totalFound,
+          hasMore: syncResult.hasMore,
+          syncTimestamp: syncResult.syncTimestamp
+        });
+        
+        // Update sync time on successful sync
+        setLastSyncTime(new Date());
+        
+        // Show appropriate feedback based on results
+        if (data.length === 0) {
+          toast.info('Sincronização concluída', { 
+            description: 'Nenhuma conversa nova encontrada' 
+          });
+        } else {
+          toast.success('Sincronização concluída', { 
+            description: `${data.length} conversa${data.length > 1 ? 's' : ''} atualizada${data.length > 1 ? 's' : ''}` 
+          });
+        }
+        
+        // If this is an incremental sync, merge with existing conversations
+        if (lastSyncTimestamp && data.length > 0) {
+          setConversations(prev => {
+            const updatedConversations = [...prev];
             
-            return {
-              ...conv,
-              lastMessage: lastMessage || undefined,
-              unreadCount
-            };
-          } catch {
-            return { ...conv, unreadCount: 0 };
-          }
-        })
-      );
+            // Update existing conversations or add new ones
+            data.forEach(newConv => {
+              const existingIndex = updatedConversations.findIndex(c => c.id === newConv.id);
+              if (existingIndex >= 0) {
+                updatedConversations[existingIndex] = newConv;
+              } else {
+                updatedConversations.unshift(newConv);
+              }
+            });
+            
+            // Sort by updated_at
+            return updatedConversations.sort((a, b) => 
+              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+          });
+          return;
+        }
+      } else {
+        // Fallback to traditional fetch
+        const rawData = await dbClient.conversations.listWithContact();
+        
+        const conversationsWithDetails = await Promise.all(
+          rawData.map(async (conv) => {
+            try {
+              const messages = await dbClient.messages.listByConversation(conv.id);
+              const lastMessage = messages[messages.length - 1];
+              const unreadCount = messages.filter(m => !m.sender_is_user && !m.internal_message).length;
+              
+              return {
+                ...conv,
+                lastMessage: lastMessage || undefined,
+                unreadCount
+              };
+            } catch {
+              return { ...conv, unreadCount: 0 };
+            }
+          })
+        );
+        
+        data = conversationsWithDetails;
+      }
       
-      setConversations(conversationsWithDetails);
+      setConversations(data);
     } catch (error: any) {
-      toast.error('Erro ao buscar conversas', { description: error.message });
+      console.error('[Sync] Error fetching conversations:', error);
+      setSyncError(error.message || 'Erro desconhecido');
+      toast.error('Erro ao buscar conversas', { 
+        description: error.message,
+        action: {
+          label: 'Tentar novamente',
+          onClick: () => fetchConversations(useSync, lastSyncTimestamp)
+        }
+      });
     } finally {
       setLoading(false);
     }
@@ -101,14 +187,67 @@ export default function Atendimentos() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Configurar callbacks do WebSocket para criação automática de tickets
-  useEffect(() => {
-    // Callback para novas mensagens via WebSocket - CRIA TICKETS AUTOMATICAMENTE
-    setOnNewMessage((message) => {
-      console.log('[Ticket System] Nova mensagem recebida - Criando/Atualizando ticket:', message);
+  // Manual sync function with loading state
+  const handleManualSync = useCallback(async () => {
+    console.log('[Sync] Manual sync requested');
+    setSyncError(null);
+    
+    try {
+      // Try WebSocket sync first, fallback to REST
+      const syncCorrelationId = requestSync();
       
-      // Atualizar a lista de tickets (conversas) imediatamente
-      fetchConversations();
+      if (!syncCorrelationId) {
+        // Fallback to REST sync if WebSocket is not available
+        await fetchConversations(true);
+        setLastSyncTime(new Date());
+        toast.success('Sincronização concluída', { description: 'Conversas atualizadas via REST' });
+      }
+      // WebSocket sync response will be handled by the callback
+    } catch (error: any) {
+      console.error('[Sync] Manual sync failed:', error);
+      setSyncError(error.message || 'Erro desconhecido');
+      toast.error('Erro na sincronização', { description: error.message });
+    }
+  }, [requestSync, fetchConversations]);
+
+  // Enhanced WebSocket callbacks with proper state synchronization
+  useEffect(() => {
+    // Callback para novas mensagens via WebSocket - ATUALIZA EM TEMPO REAL
+    setOnNewMessage((message) => {
+      console.log('[WebSocket] Nova mensagem recebida - Atualizando UI:', message);
+      
+      // Update conversations list efficiently
+      setConversations(prev => {
+        const updatedConversations = [...prev];
+        const existingIndex = updatedConversations.findIndex(c => c.id === message.conversationId);
+        
+        if (existingIndex >= 0) {
+          // Update existing conversation
+          const existingConv = updatedConversations[existingIndex];
+          updatedConversations[existingIndex] = {
+            ...existingConv,
+            updated_at: message.timestamp,
+            lastMessage: {
+              id: message.messageId,
+              content: message.content,
+              created_at: message.timestamp,
+              sender_is_user: false,
+              message_type: (message.messageType as MessageType) || 'text'
+            },
+            unreadCount: (existingConv.unreadCount || 0) + 1
+          };
+          
+          // Move to top
+          const updatedConv = updatedConversations.splice(existingIndex, 1)[0];
+          updatedConversations.unshift(updatedConv);
+        } else {
+          // This is a new conversation, trigger a full sync
+          console.log('[WebSocket] New conversation detected, triggering sync');
+          setTimeout(() => fetchConversations(true), 1000);
+        }
+        
+        return updatedConversations;
+      });
       
       // Se a conversa ativa é a que recebeu a mensagem, atualizar as mensagens também
       if (activeConversation?.id === message.conversationId) {
@@ -118,30 +257,56 @@ export default function Atendimentos() {
       // Mostrar notificação do novo ticket/mensagem
       if (permission === 'granted') {
         showNotification({
-          title: 'Novo Ticket - WhatsApp',
+          title: 'Nova Mensagem - WhatsApp',
           body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
-          tag: `ticket-${message.conversationId}`,
+          tag: `message-${message.conversationId}`,
         });
         playNotificationSound();
       }
       
-      // Log para debug do sistema de tickets
-      console.log(`[Ticket System] Ticket atualizado para contato: ${message.contactName} (${message.contactPhone})`);
+      console.log(`[WebSocket] Conversa atualizada para contato: ${message.contactName} (${message.contactPhone})`);
     });
 
-    // Callback para atualizações de conexão - SINCRONIZA TICKETS QUANDO CONECTA
+    // Callback para atualizações de conexão - SINCRONIZA QUANDO CONECTA
     setOnConnectionUpdate((update) => {
-      console.log('[Ticket System] Atualização de conexão:', update);
+      console.log('[WebSocket] Atualização de conexão:', update);
       
       if (update.status === 'CONNECTED') {
-        console.log('[Ticket System] WhatsApp conectado - Sincronizando tickets automaticamente...');
+        console.log('[WebSocket] WhatsApp conectado - Sincronizando automaticamente...');
         // Aguardar um pouco para garantir que o webhook foi configurado
         setTimeout(() => {
-          fetchConversations();
+          fetchConversations(true);
         }, 2000);
       }
     });
-  }, [setOnNewMessage, setOnConnectionUpdate, fetchConversations, fetchMessages, activeConversation, permission, showNotification, playNotificationSound]);
+
+    // Callback para respostas de sincronização via WebSocket
+    setOnSyncComplete((data) => {
+      console.log('[WebSocket] Sync response received:', data);
+      
+      if (data.success) {
+        setLastSyncTime(new Date());
+        setSyncError(null);
+        
+        if (data.conversations && data.conversations.length > 0) {
+          // Update conversations with synced data
+          setConversations(data.conversations);
+          toast.success('Sincronização concluída', { 
+            description: `${data.totalFound} conversas atualizadas via WebSocket` 
+          });
+        } else {
+          toast.info('Sincronização concluída', { 
+            description: 'Nenhuma conversa nova encontrada' 
+          });
+        }
+      } else {
+        setSyncError(data.error || 'Erro desconhecido');
+        toast.error('Erro na sincronização', { 
+          description: data.error || 'Erro desconhecido' 
+        });
+      }
+    });
+  }, [setOnNewMessage, setOnConnectionUpdate, setOnSyncComplete, fetchConversations, fetchMessages, activeConversation, permission, showNotification, playNotificationSound]);
 
   const handleSelectConversation = (conversation: ConversationWithDetails) => {
     setActiveConversation(conversation);
@@ -203,7 +368,31 @@ export default function Atendimentos() {
       {/* Lista de conversas */}
       <nav className="flex w-full max-w-sm flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Caixa de Entrada</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Caixa de Entrada</h1>
+            
+            {/* Connection Status and Sync Controls */}
+            <div className="flex items-center gap-3">
+              {/* Sync Status Component */}
+              <SyncStatus
+                isLoading={loading}
+                lastSyncTime={lastSyncTime || undefined}
+                error={syncError}
+                onManualSync={handleManualSync}
+                showLastSync={false}
+              />
+              
+              {/* Connection Status Component */}
+              <ConnectionStatus
+                isConnected={isConnected}
+                connectionQuality={connectionQuality}
+                lastHeartbeat={lastHeartbeat}
+                reconnectionState={reconnectionState}
+                onForceReconnect={forceReconnect}
+                showDetails={false}
+              />
+            </div>
+          </div>
           
           {/* Campo de busca */}
           <div className="mt-4">
@@ -253,10 +442,16 @@ export default function Atendimentos() {
         </div>
 
         {/* Lista de conversas */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto relative">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+            <div className="flex flex-col items-center justify-center py-12">
+              <RefreshCw className="w-8 h-8 animate-spin text-primary mb-3" />
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                {syncError ? 'Tentando reconectar...' : 'Sincronizando conversas...'}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Aguarde enquanto buscamos as conversas mais recentes
+              </p>
             </div>
           ) : filteredConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -266,12 +461,30 @@ export default function Atendimentos() {
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 Aguardando Tickets
               </h3>
-              <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs">
+              <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs mb-4">
                 Os tickets aparecerão aqui automaticamente quando chegarem mensagens no WhatsApp
               </p>
-              <div className="mt-4 flex items-center gap-2 text-xs text-gray-400">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span>Sistema conectado via WebSocket</span>
+              
+              {/* Enhanced connection status in empty state */}
+              <div className="space-y-3">
+                <ConnectionStatus
+                  isConnected={isConnected}
+                  connectionQuality={connectionQuality}
+                  lastHeartbeat={lastHeartbeat}
+                  reconnectionState={reconnectionState}
+                  onForceReconnect={forceReconnect}
+                  showDetails={true}
+                  className="justify-center"
+                />
+                
+                {lastSyncTime && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Última sincronização: {lastSyncTime.toLocaleTimeString('pt-BR', { 
+                      hour: '2-digit', 
+                      minute: '2-digit' 
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           ) : (
