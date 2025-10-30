@@ -2,43 +2,45 @@ export type TicketStatus = 'new' | 'open' | 'pending' | 'resolved' | 'closed';
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type TicketCategory = 'support' | 'sales' | 'billing' | 'technical' | 'other';
 
+// Sistema de Tickets Automático - Implementado
+
 export interface Ticket {
   id: string;
   number: string; // Número sequencial do ticket (ex: #2024001)
   user_id: string;
   conversation_id: string;
   contact_id: string;
-  
+
   // Informações do ticket
   subject: string;
   description?: string;
   status: TicketStatus;
   priority: TicketPriority;
   category: TicketCategory;
-  
+
   // Atribuição
   assigned_to?: string; // ID do agente responsável
   assigned_at?: string;
-  
+
   // Timestamps
   created_at: string;
   updated_at: string;
   first_response_at?: string;
   resolved_at?: string;
   closed_at?: string;
-  
+
   // SLA
   sla_due_at?: string;
   sla_breached?: boolean;
-  
+
   // Métricas
   response_time?: number; // Em minutos
   resolution_time?: number; // Em minutos
-  
+
   // Tags e metadados
   tags?: string[];
   metadata?: Record<string, any>;
-  
+
   // Relacionamentos
   contact?: {
     id: string;
@@ -46,19 +48,19 @@ export interface Ticket {
     phone_number: string;
     avatar_url: string | null;
   };
-  
+
   conversation?: {
     id: string;
     status: string;
     updated_at: string;
   };
-  
+
   assigned_agent?: {
     id: string;
     name: string | null;
     email: string;
   };
-  
+
   // Estatísticas
   message_count?: number;
   unread_count?: number;
@@ -79,7 +81,7 @@ export interface TicketActivity {
   old_value?: string;
   new_value?: string;
   created_at: string;
-  
+
   user?: {
     id: string;
     name: string | null;
@@ -94,7 +96,7 @@ export interface TicketComment {
   content: string;
   is_internal: boolean; // Se é visível apenas para agentes
   created_at: string;
-  
+
   user?: {
     id: string;
     name: string | null;
@@ -109,18 +111,18 @@ export interface TicketStats {
   pending: number;
   resolved: number;
   closed: number;
-  
+
   // Por prioridade
   low_priority: number;
   normal_priority: number;
   high_priority: number;
   urgent_priority: number;
-  
+
   // Métricas de tempo
   avg_response_time: number; // Em minutos
   avg_resolution_time: number; // Em minutos
   sla_breached: number;
-  
+
   // Por categoria
   support: number;
   sales: number;

@@ -5,6 +5,8 @@ import { ticketService } from '@/lib/ticketService';
 import { Conversation } from '@/types/database';
 import { Ticket } from '@/types/ticket';
 
+// Hook para sincronização automática de tickets
+
 interface AutoSyncOptions {
   enabled?: boolean;
   syncInterval?: number; // em milissegundos

@@ -2,6 +2,8 @@ import { supabase } from './supabase';
 import { Ticket, TicketStatus, TicketPriority, TicketCategory, TicketActivity, TicketStats } from '@/types/ticket';
 import { Conversation, Message } from '@/types/database';
 
+// Serviço completo para gerenciamento de tickets
+
 class TicketService {
   private async getUserId(): Promise<string> {
     const { data: { session } } = await supabase.auth.getSession();
