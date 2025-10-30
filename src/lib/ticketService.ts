@@ -28,7 +28,7 @@ class TicketService {
   /**
    * Determina a prioridade automática baseada em critérios
    */
-  private determinePriority(conversation: Conversation, firstMessage?: Message): TicketPriority {
+  private determinePriority(_conversation: Conversation, firstMessage?: Message): TicketPriority {
     // Lógica de prioridade automática
     const content = firstMessage?.content?.toLowerCase() || '';
     
@@ -418,7 +418,7 @@ class TicketService {
     let responseTimeCount = 0;
     let resolutionTimeCount = 0;
 
-    stats.forEach(ticket => {
+    stats.forEach((ticket: any) => {
       // Contar por status
       result[ticket.status as keyof Pick<TicketStats, 'new' | 'open' | 'pending' | 'resolved' | 'closed'>]++;
       

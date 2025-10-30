@@ -33,12 +33,9 @@ const mockConversations = [
     updated_at: '2024-01-01T10:00:00Z',
     user_id: 'test-user-id',
     contacts: {
-      id: 'contact-1',
       name: 'Test Contact',
       phone_number: '1234567890',
-      user_id: 'test-user-id',
-      created_at: '2024-01-01T10:00:00Z',
-      updated_at: '2024-01-01T10:00:00Z'
+      avatar_url: null
     }
   }
 ];
@@ -410,9 +407,9 @@ describe('Sync Functionality Integration Tests', () => {
           id: 'conv-new',
           updated_at: new Date().toISOString(),
           contacts: {
-            ...mockConversations[0].contacts,
-            id: 'contact-new',
-            name: 'New Contact'
+            name: 'New Contact',
+            phone_number: '1234567890',
+            avatar_url: null
           }
         }
       ];

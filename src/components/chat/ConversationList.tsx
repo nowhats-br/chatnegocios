@@ -4,7 +4,7 @@ import { Tabs, TabsTrigger } from '@/components/ui/Tabs';
 import Button from '@/components/ui/Button';
 import { Conversation, ConversationStatus } from '@/types/database';
 import { cn } from '@/lib/utils';
-import SyncStatus from '@/components/ui/SyncStatus';
+// SyncStatus removido - agora usa sincronização automática
 
 type ConversationWithLastMessage = Conversation & {
   lastMessage?: {
@@ -75,15 +75,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
       <div className="p-4 border-b">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Conversas</h2>
-          {onManualSync && (
-            <SyncStatus
-              isLoading={loading}
-              lastSyncTime={lastSyncTime || undefined}
-              error={syncError}
-              onManualSync={onManualSync}
-              showLastSync={false}
-            />
-          )}
+          {/* SyncStatus removido - agora usa sincronização automática */}
         </div>
         
         <div className="relative">
