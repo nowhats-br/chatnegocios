@@ -16,19 +16,25 @@ import {
   Receipt,
   Star,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Ticket as TicketIcon,
+  AlertCircle,
+  TrendingUp
 } from 'lucide-react';
-import { Conversation, ConversationStatus, Message, MessageType } from '@/types/database';
+import { Conversation, Message, MessageType } from '@/types/database';
+import { Ticket, TicketStatus, TicketPriority } from '@/types/ticket';
 import { dbClient } from '@/lib/dbClient';
+import { ticketService } from '@/lib/ticketService';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useAutoSync } from '@/hooks/useAutoSync';
 import ConnectionStatus from '@/components/ui/ConnectionStatus';
-import SyncStatus from '@/components/ui/SyncStatus';
 
 import { cn } from '@/lib/utils';
 
-interface ConversationWithDetails extends Conversation {
+interface TicketWithDetails extends Ticket {
+  conversation?: Conversation;
   lastMessage?: {
     id: string;
     content: string | null;
@@ -37,25 +43,18 @@ interface ConversationWithDetails extends Conversation {
     message_type: MessageType;
   };
   unreadCount?: number;
-  contact?: {
-    id: string;
-    name: string;
-    phone_number: string;
-  };
 }
 
 export default function Atendimentos() {
-  const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
-  const [activeConversation, setActiveConversation] = useState<ConversationWithDetails | null>(null);
+  const [tickets, setTickets] = useState<TicketWithDetails[]>([]);
+  const [activeTicket, setActiveTicket] = useState<TicketWithDetails | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<ConversationStatus>('pending');
+  const [activeFilter, setActiveFilter] = useState<TicketStatus>('new');
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [showHistoryDetails, setShowHistoryDetails] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
   
   const { user } = useAuth();
   const { permission, showNotification, playNotificationSound } = useNotifications();
@@ -66,110 +65,97 @@ export default function Atendimentos() {
     reconnectionState,
     forceReconnect,
     setOnNewMessage,
-    setOnConnectionUpdate,
-    setOnSyncComplete,
-    requestSync
+    setOnConnectionUpdate
   } = useWebSocket();
 
-  // Enhanced conversation fetching with sync support
-  const fetchConversations = useCallback(async (useSync = false, lastSyncTimestamp?: string) => {
-    setLoading(true);
-    setSyncError(null);
-    
-    try {
-      let data: ConversationWithDetails[];
+  // Sistema de sincronização automática
+  const {
+    isRunning: isSyncing,
+    lastSyncTime,
+    error: syncError,
+    syncCount
+  } = useAutoSync({
+    enabled: true,
+    syncInterval: 30000, // 30 segundos
+    onSyncComplete: (data) => {
+      console.log('[AutoSync] Sincronização completa:', data);
+      if (data.tickets.length > 0) {
+        toast.success(`${data.tickets.length} novo${data.tickets.length > 1 ? 's' : ''} ticket${data.tickets.length > 1 ? 's' : ''} criado${data.tickets.length > 1 ? 's' : ''}!`);
+      }
+      fetchTickets(); // Recarregar tickets após sincronização
+    },
+    onSyncError: (error) => {
+      console.error('[AutoSync] Erro na sincronização:', error);
+      toast.error('Erro na sincronização automática', { description: error });
+    },
+    onNewTicket: (ticket) => {
+      console.log('[AutoSync] Novo ticket criado:', ticket);
       
-      if (useSync) {
-        // Use the new sync endpoint for efficient updates
-        const syncResult = await dbClient.conversations.sync(lastSyncTimestamp);
-        data = syncResult.conversations.map(conv => ({
-          ...conv,
-          lastMessage: (conv as any).lastMessage || undefined,
-          unreadCount: (conv as any).unreadCount || 0
-        }));
-        
-        console.log('[Sync] Conversations synced:', {
-          found: syncResult.totalFound,
-          hasMore: syncResult.hasMore,
-          syncTimestamp: syncResult.syncTimestamp
+      // Mostrar notificação de novo ticket
+      if (permission === 'granted') {
+        showNotification({
+          title: `Novo Ticket #${ticket.number}`,
+          body: `${ticket.contact?.name || 'Cliente'}: ${ticket.subject}`,
+          tag: `ticket-${ticket.id}`,
         });
-        
-        // Update sync time on successful sync
-        setLastSyncTime(new Date());
-        
-        // Show appropriate feedback based on results
-        if (data.length === 0) {
-          toast.info('Sincronização concluída', { 
-            description: 'Nenhuma conversa nova encontrada' 
-          });
-        } else {
-          toast.success('Sincronização concluída', { 
-            description: `${data.length} conversa${data.length > 1 ? 's' : ''} atualizada${data.length > 1 ? 's' : ''}` 
-          });
-        }
-        
-        // If this is an incremental sync, merge with existing conversations
-        if (lastSyncTimestamp && data.length > 0) {
-          setConversations(prev => {
-            const updatedConversations = [...prev];
-            
-            // Update existing conversations or add new ones
-            data.forEach(newConv => {
-              const existingIndex = updatedConversations.findIndex(c => c.id === newConv.id);
-              if (existingIndex >= 0) {
-                updatedConversations[existingIndex] = newConv;
-              } else {
-                updatedConversations.unshift(newConv);
-              }
-            });
-            
-            // Sort by updated_at
-            return updatedConversations.sort((a, b) => 
-              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-            );
-          });
-          return;
-        }
-      } else {
-        // Fallback to traditional fetch
-        const rawData = await dbClient.conversations.listWithContact();
-        
-        const conversationsWithDetails = await Promise.all(
-          rawData.map(async (conv) => {
-            try {
-              const messages = await dbClient.messages.listByConversation(conv.id);
-              const lastMessage = messages[messages.length - 1];
-              const unreadCount = messages.filter(m => !m.sender_is_user && !m.internal_message).length;
-              
-              return {
-                ...conv,
-                lastMessage: lastMessage || undefined,
-                unreadCount
-              };
-            } catch {
-              return { ...conv, unreadCount: 0 };
-            }
-          })
-        );
-        
-        data = conversationsWithDetails;
+        playNotificationSound();
       }
       
-      setConversations(data);
+      // Adicionar ticket à lista
+      setTickets(prev => [ticket as TicketWithDetails, ...prev]);
+    }
+  });
+
+  // Função para buscar tickets
+  const fetchTickets = useCallback(async () => {
+    setLoading(true);
+    
+    try {
+      const { tickets: ticketData } = await ticketService.getTickets({
+        status: activeFilter ? [activeFilter] : undefined,
+        search: searchTerm || undefined
+      });
+      
+      // Enriquecer tickets com informações de mensagens
+      const ticketsWithDetails = await Promise.all(
+        ticketData.map(async (ticket) => {
+          try {
+            const messages = await dbClient.messages.listByConversation(ticket.conversation_id);
+            const lastMessage = messages[messages.length - 1];
+            const unreadCount = messages.filter(m => !m.sender_is_user && !m.internal_message).length;
+            
+            return {
+              ...ticket,
+              lastMessage: lastMessage || undefined,
+              unreadCount
+            };
+          } catch {
+            return { ...ticket, unreadCount: 0 };
+          }
+        })
+      );
+      
+      setTickets(ticketsWithDetails as TicketWithDetails[]);
+      
+      console.log('[Tickets] Tickets carregados:', {
+        total: ticketsWithDetails.length,
+        filter: activeFilter,
+        search: searchTerm
+      });
+      
     } catch (error: any) {
-      console.error('[Sync] Error fetching conversations:', error);
-      setSyncError(error.message || 'Erro desconhecido');
-      toast.error('Erro ao buscar conversas', { 
+      console.error('[Tickets] Erro ao buscar tickets:', error);
+      toast.error('Erro ao buscar tickets', { 
         description: error.message,
         action: {
           label: 'Tentar novamente',
-          onClick: () => fetchConversations(useSync, lastSyncTimestamp)
+          onClick: () => fetchTickets()
         }
       });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeFilter, searchTerm]);
 
   const fetchMessages = useCallback(async (conversationId: string) => {
     try {
@@ -180,52 +166,51 @@ export default function Atendimentos() {
     }
   }, []);
 
-
-
   // Inicialização
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    fetchTickets();
+  }, [fetchTickets]);
 
-  // Manual sync function with loading state
-  const handleManualSync = useCallback(async () => {
-    console.log('[Sync] Manual sync requested');
-    setSyncError(null);
-    
+  // Função para atualizar status do ticket
+  const updateTicketStatus = useCallback(async (ticketId: string, newStatus: TicketStatus) => {
     try {
-      // Try WebSocket sync first, fallback to REST
-      const syncCorrelationId = requestSync();
+      await ticketService.updateTicketStatus(ticketId, newStatus);
       
-      if (!syncCorrelationId) {
-        // Fallback to REST sync if WebSocket is not available
-        await fetchConversations(true);
-        setLastSyncTime(new Date());
-        toast.success('Sincronização concluída', { description: 'Conversas atualizadas via REST' });
+      // Atualizar ticket na lista
+      setTickets(prev => prev.map(ticket => 
+        ticket.id === ticketId 
+          ? { ...ticket, status: newStatus, updated_at: new Date().toISOString() }
+          : ticket
+      ));
+      
+      // Atualizar ticket ativo se for o mesmo
+      if (activeTicket?.id === ticketId) {
+        setActiveTicket(prev => prev ? { ...prev, status: newStatus } : null);
       }
-      // WebSocket sync response will be handled by the callback
-    } catch (error: any) {
-      console.error('[Sync] Manual sync failed:', error);
-      setSyncError(error.message || 'Erro desconhecido');
-      toast.error('Erro na sincronização', { description: error.message });
-    }
-  }, [requestSync, fetchConversations]);
-
-  // Enhanced WebSocket callbacks with proper state synchronization
-  useEffect(() => {
-    // Callback para novas mensagens via WebSocket - ATUALIZA EM TEMPO REAL
-    setOnNewMessage((message) => {
-      console.log('[WebSocket] Nova mensagem recebida - Atualizando UI:', message);
       
-      // Update conversations list efficiently
-      setConversations(prev => {
-        const updatedConversations = [...prev];
-        const existingIndex = updatedConversations.findIndex(c => c.id === message.conversationId);
+      toast.success(`Ticket ${newStatus === 'resolved' ? 'resolvido' : 'atualizado'} com sucesso!`);
+      
+    } catch (error: any) {
+      toast.error('Erro ao atualizar ticket', { description: error.message });
+    }
+  }, [activeTicket]);
+
+  // Enhanced WebSocket callbacks with ticket integration
+  useEffect(() => {
+    // Callback para novas mensagens via WebSocket - ATUALIZA TICKETS EM TEMPO REAL
+    setOnNewMessage((message) => {
+      console.log('[WebSocket] Nova mensagem recebida - Atualizando tickets:', message);
+      
+      // Atualizar tickets existentes ou criar novo se necessário
+      setTickets(prev => {
+        const updatedTickets = [...prev];
+        const existingIndex = updatedTickets.findIndex(t => t.conversation_id === message.conversationId);
         
         if (existingIndex >= 0) {
-          // Update existing conversation
-          const existingConv = updatedConversations[existingIndex];
-          updatedConversations[existingIndex] = {
-            ...existingConv,
+          // Atualizar ticket existente
+          const existingTicket = updatedTickets[existingIndex];
+          updatedTickets[existingIndex] = {
+            ...existingTicket,
             updated_at: message.timestamp,
             lastMessage: {
               id: message.messageId,
@@ -234,111 +219,125 @@ export default function Atendimentos() {
               sender_is_user: false,
               message_type: (message.messageType as MessageType) || 'text'
             },
-            unreadCount: (existingConv.unreadCount || 0) + 1
+            unreadCount: (existingTicket.unreadCount || 0) + 1
           };
           
-          // Move to top
-          const updatedConv = updatedConversations.splice(existingIndex, 1)[0];
-          updatedConversations.unshift(updatedConv);
-        } else {
-          // This is a new conversation, trigger a full sync
-          console.log('[WebSocket] New conversation detected, triggering sync');
-          setTimeout(() => fetchConversations(true), 1000);
+          // Mover para o topo
+          const updatedTicket = updatedTickets.splice(existingIndex, 1)[0];
+          updatedTickets.unshift(updatedTicket);
+          
+          // Atualizar primeira resposta se necessário
+          if (!existingTicket.first_response_at && !message.sender_is_user) {
+            ticketService.updateFirstResponseTime(existingTicket.id);
+          }
+        } else if (message.isNewConversation) {
+          // Nova conversa detectada - o sistema de auto-sync criará o ticket
+          console.log('[WebSocket] Nova conversa detectada, aguardando criação de ticket...');
         }
         
-        return updatedConversations;
+        return updatedTickets;
       });
       
-      // Se a conversa ativa é a que recebeu a mensagem, atualizar as mensagens também
-      if (activeConversation?.id === message.conversationId) {
+      // Se o ticket ativo é o que recebeu a mensagem, atualizar as mensagens também
+      if (activeTicket?.conversation_id === message.conversationId) {
         fetchMessages(message.conversationId);
       }
       
-      // Mostrar notificação do novo ticket/mensagem
+      // Mostrar notificação
       if (permission === 'granted') {
         showNotification({
-          title: 'Nova Mensagem - WhatsApp',
+          title: 'Nova Mensagem - Ticket',
           body: `${message.contactName}: ${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}`,
           tag: `message-${message.conversationId}`,
         });
         playNotificationSound();
       }
       
-      console.log(`[WebSocket] Conversa atualizada para contato: ${message.contactName} (${message.contactPhone})`);
+      console.log(`[WebSocket] Ticket atualizado para contato: ${message.contactName} (${message.contactPhone})`);
     });
 
-    // Callback para atualizações de conexão - SINCRONIZA QUANDO CONECTA
+    // Callback para atualizações de conexão - TRIGGER AUTO-SYNC
     setOnConnectionUpdate((update) => {
       console.log('[WebSocket] Atualização de conexão:', update);
       
       if (update.status === 'CONNECTED') {
-        console.log('[WebSocket] WhatsApp conectado - Sincronizando automaticamente...');
-        // Aguardar um pouco para garantir que o webhook foi configurado
-        setTimeout(() => {
-          fetchConversations(true);
-        }, 2000);
+        console.log('[WebSocket] WhatsApp conectado - Auto-sync ativo');
+        // O auto-sync já está rodando, não precisa fazer nada manual
       }
     });
+  }, [setOnNewMessage, setOnConnectionUpdate, fetchMessages, activeTicket, permission, showNotification, playNotificationSound]);
 
-    // Callback para respostas de sincronização via WebSocket
-    setOnSyncComplete((data) => {
-      console.log('[WebSocket] Sync response received:', data);
-      
-      if (data.success) {
-        setLastSyncTime(new Date());
-        setSyncError(null);
-        
-        if (data.conversations && data.conversations.length > 0) {
-          // Update conversations with synced data
-          setConversations(data.conversations);
-          toast.success('Sincronização concluída', { 
-            description: `${data.totalFound} conversas atualizadas via WebSocket` 
-          });
-        } else {
-          toast.info('Sincronização concluída', { 
-            description: 'Nenhuma conversa nova encontrada' 
-          });
-        }
-      } else {
-        setSyncError(data.error || 'Erro desconhecido');
-        toast.error('Erro na sincronização', { 
-          description: data.error || 'Erro desconhecido' 
-        });
-      }
-    });
-  }, [setOnNewMessage, setOnConnectionUpdate, setOnSyncComplete, fetchConversations, fetchMessages, activeConversation, permission, showNotification, playNotificationSound]);
-
-  const handleSelectConversation = (conversation: ConversationWithDetails) => {
-    setActiveConversation(conversation);
-    fetchMessages(conversation.id);
+  const handleSelectTicket = (ticket: TicketWithDetails) => {
+    setActiveTicket(ticket);
+    fetchMessages(ticket.conversation_id);
+    
+    // Marcar ticket como aberto se estava como novo
+    if (ticket.status === 'new') {
+      updateTicketStatus(ticket.id, 'open');
+    }
   };
 
   const handleSendMessage = async () => {
-    if (!messageText.trim() || !activeConversation || !user) return;
+    if (!messageText.trim() || !activeTicket || !user) return;
 
     try {
       await dbClient.messages.create({
-        conversation_id: activeConversation.id,
+        conversation_id: activeTicket.conversation_id,
         content: messageText,
         sender_is_user: true,
         message_type: 'text',
       });
 
       setMessageText('');
-      fetchMessages(activeConversation.id);
-      fetchConversations();
+      fetchMessages(activeTicket.conversation_id);
+      
+      // Atualizar primeira resposta se necessário
+      if (!activeTicket.first_response_at) {
+        await ticketService.updateFirstResponseTime(activeTicket.id);
+      }
+      
+      // Atualizar status para 'open' se estava como 'new'
+      if (activeTicket.status === 'new') {
+        updateTicketStatus(activeTicket.id, 'open');
+      }
+      
     } catch (error: any) {
       toast.error('Erro ao enviar mensagem', { description: error.message });
     }
   };
 
-  const filteredConversations = conversations.filter(conv => {
-    const matchesFilter = conv.status === activeFilter;
+  const filteredTickets = tickets.filter(ticket => {
+    const matchesFilter = !activeFilter || ticket.status === activeFilter;
     const matchesSearch = !searchTerm || 
-      conv.contact?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      conv.contact?.phone_number?.includes(searchTerm);
+      ticket.contact?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ticket.contact?.phone_number?.includes(searchTerm) ||
+      ticket.subject?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ticket.number?.includes(searchTerm);
     return matchesFilter && matchesSearch;
   });
+
+  // Função para obter cor da prioridade
+  const getPriorityColor = (priority: TicketPriority) => {
+    switch (priority) {
+      case 'urgent': return 'text-red-600 bg-red-100 dark:bg-red-900/50 dark:text-red-300';
+      case 'high': return 'text-orange-600 bg-orange-100 dark:bg-orange-900/50 dark:text-orange-300';
+      case 'normal': return 'text-blue-600 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-300';
+      case 'low': return 'text-gray-600 bg-gray-100 dark:bg-gray-900/50 dark:text-gray-300';
+      default: return 'text-gray-600 bg-gray-100 dark:bg-gray-900/50 dark:text-gray-300';
+    }
+  };
+
+  // Função para obter cor do status
+  const getStatusColor = (status: TicketStatus) => {
+    switch (status) {
+      case 'new': return 'text-purple-600 bg-purple-100 dark:bg-purple-900/50 dark:text-purple-300';
+      case 'open': return 'text-blue-600 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-300';
+      case 'pending': return 'text-yellow-600 bg-yellow-100 dark:bg-yellow-900/50 dark:text-yellow-300';
+      case 'resolved': return 'text-green-600 bg-green-100 dark:bg-green-900/50 dark:text-green-300';
+      case 'closed': return 'text-gray-600 bg-gray-100 dark:bg-gray-900/50 dark:text-gray-300';
+      default: return 'text-gray-600 bg-gray-100 dark:bg-gray-900/50 dark:text-gray-300';
+    }
+  };
 
   const formatTime = (date: string) => {
     const messageDate = new Date(date);
@@ -369,18 +368,21 @@ export default function Atendimentos() {
       <nav className="flex w-full max-w-sm flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Caixa de Entrada</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Sistema de Tickets</h1>
             
-            {/* Connection Status and Sync Controls */}
+            {/* Connection Status and Auto-Sync Status */}
             <div className="flex items-center gap-3">
-              {/* Sync Status Component */}
-              <SyncStatus
-                isLoading={loading}
-                lastSyncTime={lastSyncTime || undefined}
-                error={syncError}
-                onManualSync={handleManualSync}
-                showLastSync={false}
-              />
+              {/* Auto-Sync Status */}
+              <div className="flex items-center gap-2">
+                {isSyncing ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                ) : (
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                )}
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {isSyncing ? 'Sincronizando...' : `Sync: ${syncCount}`}
+                </span>
+              </div>
               
               {/* Connection Status Component */}
               <ConnectionStatus
@@ -409,64 +411,93 @@ export default function Atendimentos() {
             </div>
           </div>
 
-          {/* Filtros */}
-          <div className="flex gap-2 pt-4">
+          {/* Filtros de Status */}
+          <div className="flex gap-2 pt-4 flex-wrap">
             <button 
-              onClick={() => setActiveFilter('pending')}
+              onClick={() => setActiveFilter('new')}
               className={cn(
                 "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
-                activeFilter === 'pending' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                activeFilter === 'new' ? "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
               )}
             >
-              <p className="text-sm font-medium leading-normal">Ativos</p>
+              <TicketIcon className="w-3 h-3" />
+              <p className="text-sm font-medium leading-normal">Novos</p>
+            </button>
+            <button 
+              onClick={() => setActiveFilter('open')}
+              className={cn(
+                "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
+                activeFilter === 'open' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+              )}
+            >
+              <p className="text-sm font-medium leading-normal">Abertos</p>
             </button>
             <button 
               onClick={() => setActiveFilter('pending')}
               className={cn(
                 "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
-                activeFilter === 'pending' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                activeFilter === 'pending' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
               )}
             >
-              <p className="text-sm font-medium leading-normal">Aguardando</p>
+              <Clock className="w-3 h-3" />
+              <p className="text-sm font-medium leading-normal">Pendentes</p>
             </button>
             <button 
               onClick={() => setActiveFilter('resolved')}
               className={cn(
                 "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-x-2 rounded-full pl-3 pr-3",
-                activeFilter === 'resolved' ? "bg-primary/20 text-primary" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                activeFilter === 'resolved' ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
               )}
             >
-              <p className="text-sm font-medium leading-normal">Finalizados</p>
+              <CheckCircle className="w-3 h-3" />
+              <p className="text-sm font-medium leading-normal">Resolvidos</p>
             </button>
           </div>
         </div>
 
-        {/* Lista de conversas */}
+        {/* Lista de tickets */}
         <div className="flex-1 overflow-y-auto relative">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <RefreshCw className="w-8 h-8 animate-spin text-primary mb-3" />
               <p className="text-sm font-medium text-gray-900 dark:text-white">
-                {syncError ? 'Tentando reconectar...' : 'Sincronizando conversas...'}
+                {syncError ? 'Tentando reconectar...' : 'Carregando tickets...'}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Aguarde enquanto buscamos as conversas mais recentes
+                Aguarde enquanto buscamos os tickets mais recentes
               </p>
             </div>
-          ) : filteredConversations.length === 0 ? (
+          ) : filteredTickets.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
-                <RefreshCw className="w-8 h-8 text-gray-400" />
+                <TicketIcon className="w-8 h-8 text-gray-400" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                Aguardando Tickets
+                {activeFilter === 'new' ? 'Nenhum ticket novo' : `Nenhum ticket ${activeFilter}`}
               </h3>
               <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs mb-4">
-                Os tickets aparecerão aqui automaticamente quando chegarem mensagens no WhatsApp
+                {activeFilter === 'new' 
+                  ? 'Novos tickets aparecerão aqui automaticamente quando chegarem mensagens no WhatsApp'
+                  : `Não há tickets com status "${activeFilter}" no momento`
+                }
               </p>
               
-              {/* Enhanced connection status in empty state */}
+              {/* Status de sincronização automática */}
               <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  {isSyncing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Sincronização automática ativa...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span>Sistema sincronizado ({syncCount} sync)</span>
+                    </>
+                  )}
+                </div>
+                
                 <ConnectionStatus
                   isConnected={isConnected}
                   connectionQuality={connectionQuality}
@@ -488,60 +519,81 @@ export default function Atendimentos() {
               </div>
             </div>
           ) : (
-            filteredConversations.map((conversation) => {
-              // Determinar se é um ticket novo (não lido)
-              const isNewTicket = conversation.unreadCount && conversation.unreadCount > 0;
-              const isActiveTicket = activeConversation?.id === conversation.id;
+            filteredTickets.map((ticket) => {
+              const isNewTicket = ticket.status === 'new' || (ticket.unreadCount && ticket.unreadCount > 0);
+              const isActiveTicket = activeTicket?.id === ticket.id;
               
               return (
                 <div
-                  key={conversation.id}
-                  onClick={() => handleSelectConversation(conversation)}
+                  key={ticket.id}
+                  onClick={() => handleSelectTicket(ticket)}
                   className={cn(
-                    "flex gap-4 px-4 py-3 justify-between cursor-pointer transition-all duration-200",
+                    "flex gap-4 px-4 py-3 justify-between cursor-pointer transition-all duration-200 border-l-4",
                     isActiveTicket 
-                      ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" 
-                      : "hover:bg-gray-50 dark:hover:bg-gray-800/50",
-                    isNewTicket && "bg-blue-50/50 dark:bg-blue-900/10"
+                      ? "bg-primary/10 dark:bg-primary/20 border-primary" 
+                      : "hover:bg-gray-50 dark:hover:bg-gray-800/50 border-transparent",
+                    isNewTicket && "bg-purple-50/50 dark:bg-purple-900/10"
                   )}
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="relative flex-shrink-0">
-                      {/* Avatar do contato - estilo WhatsApp Web */}
+                      {/* Avatar do contato */}
                       <div className="bg-gradient-to-br from-primary to-primary/80 rounded-full size-12 flex items-center justify-center text-white font-semibold text-lg shadow-sm">
-                        {conversation.contact?.name?.charAt(0)?.toUpperCase() || 
-                         conversation.contact?.phone_number?.slice(-2) || 'U'}
+                        {ticket.contact?.name?.charAt(0)?.toUpperCase() || 
+                         ticket.contact?.phone_number?.slice(-2) || 'U'}
                       </div>
-                      {/* Indicador de status online */}
-                      <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800"></span>
+                      {/* Indicador de prioridade */}
+                      {ticket.priority === 'urgent' && (
+                        <span className="absolute -top-1 -right-1 block h-4 w-4 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800">
+                          <AlertCircle className="w-3 h-3 text-white m-0.5" />
+                        </span>
+                      )}
+                      {ticket.priority === 'high' && (
+                        <span className="absolute -top-1 -right-1 block h-4 w-4 rounded-full bg-orange-500 ring-2 ring-white dark:ring-gray-800">
+                          <TrendingUp className="w-3 h-3 text-white m-0.5" />
+                        </span>
+                      )}
                     </div>
                     
                     <div className="flex flex-1 flex-col justify-center min-w-0">
-                      {/* Nome do contato */}
+                      {/* Cabeçalho do ticket */}
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-gray-900 dark:text-white text-base font-medium leading-normal truncate">
-                          {conversation.contact?.name || `+${conversation.contact?.phone_number}` || 'Usuário Desconhecido'}
+                          {ticket.contact?.name || `+${ticket.contact?.phone_number}` || 'Cliente'}
                         </p>
+                        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                          #{ticket.number}
+                        </span>
                         {isNewTicket && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
                             Novo
                           </span>
                         )}
                       </div>
                       
-                      {/* Última mensagem */}
-                      <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal truncate">
-                        {conversation.lastMessage?.sender_is_user ? '✓ ' : ''}
-                        {conversation.lastMessage?.content || 'Ticket criado - Aguardando primeira mensagem'}
+                      {/* Assunto do ticket */}
+                      <p className="text-gray-800 dark:text-gray-200 text-sm font-medium leading-normal truncate mb-1">
+                        {ticket.subject}
                       </p>
                       
-                      {/* Informações do ticket */}
+                      {/* Última mensagem */}
+                      <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal truncate">
+                        {ticket.lastMessage?.sender_is_user ? '✓ ' : ''}
+                        {ticket.lastMessage?.content || 'Aguardando primeira mensagem...'}
+                      </p>
+                      
+                      {/* Tags do ticket */}
                       <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          📱 {conversation.contact?.phone_number || 'Sem número'}
+                        <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", getPriorityColor(ticket.priority))}>
+                          {ticket.priority === 'urgent' ? 'Urgente' : 
+                           ticket.priority === 'high' ? 'Alta' :
+                           ticket.priority === 'normal' ? 'Normal' : 'Baixa'}
                         </span>
                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                          • Ticket #{conversation.id.slice(-6)}
+                          {ticket.category === 'support' ? 'Suporte' :
+                           ticket.category === 'sales' ? 'Vendas' :
+                           ticket.category === 'billing' ? 'Cobrança' :
+                           ticket.category === 'technical' ? 'Técnico' : 'Outros'}
                         </span>
                       </div>
                     </div>
@@ -549,20 +601,19 @@ export default function Atendimentos() {
                   
                   <div className="shrink-0 flex flex-col items-end gap-1">
                     <p className="text-gray-500 dark:text-gray-400 text-xs">
-                      {conversation.lastMessage?.created_at ? formatTime(conversation.lastMessage.created_at) : 'Agora'}
+                      {ticket.lastMessage?.created_at ? formatTime(ticket.lastMessage.created_at) : formatTime(ticket.created_at)}
                     </p>
-                    {isNewTicket && (
+                    {ticket.unreadCount && ticket.unreadCount > 0 && (
                       <div className="flex size-6 items-center justify-center rounded-full bg-primary text-white text-xs font-bold animate-pulse">
-                        {conversation.unreadCount}
+                        {ticket.unreadCount}
                       </div>
                     )}
                     {/* Status do ticket */}
-                    <div className={cn(
-                      "text-xs px-2 py-0.5 rounded-full font-medium",
-                      conversation.status === 'pending' && "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300",
-                      conversation.status === 'resolved' && "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
-                    )}>
-                      {conversation.status === 'pending' ? 'Pendente' : 'Resolvido'}
+                    <div className={cn("text-xs px-2 py-0.5 rounded-full font-medium", getStatusColor(ticket.status))}>
+                      {ticket.status === 'new' ? 'Novo' :
+                       ticket.status === 'open' ? 'Aberto' :
+                       ticket.status === 'pending' ? 'Pendente' :
+                       ticket.status === 'resolved' ? 'Resolvido' : 'Fechado'}
                     </div>
                   </div>
                 </div>
@@ -574,18 +625,36 @@ export default function Atendimentos() {
 
       {/* Área principal do chat */}
       <main className="flex flex-1 flex-col bg-gray-100/50 dark:bg-gray-900/20">
-        {activeConversation ? (
+        {activeTicket ? (
           <>
-            {/* Header do chat */}
+            {/* Header do ticket */}
             <header className="flex items-center gap-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 px-6 py-3">
               <div className="bg-primary rounded-full size-12 flex items-center justify-center text-white font-semibold">
-                {activeConversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
+                {activeTicket.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
               </div>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {activeConversation.contact?.name || 'Usuário'}
-                </h2>
-                <p className="text-sm text-green-600 dark:text-green-400">Online</p>
+              <div className="flex-1">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {activeTicket.contact?.name || 'Cliente'}
+                  </h2>
+                  <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
+                    #{activeTicket.number}
+                  </span>
+                  <span className={cn("text-xs px-2 py-1 rounded-full font-medium", getStatusColor(activeTicket.status))}>
+                    {activeTicket.status === 'new' ? 'Novo' :
+                     activeTicket.status === 'open' ? 'Aberto' :
+                     activeTicket.status === 'pending' ? 'Pendente' :
+                     activeTicket.status === 'resolved' ? 'Resolvido' : 'Fechado'}
+                  </span>
+                  <span className={cn("text-xs px-2 py-1 rounded-full font-medium", getPriorityColor(activeTicket.priority))}>
+                    {activeTicket.priority === 'urgent' ? 'Urgente' : 
+                     activeTicket.priority === 'high' ? 'Alta' :
+                     activeTicket.priority === 'normal' ? 'Normal' : 'Baixa'}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                  {activeTicket.subject}
+                </p>
               </div>
               <div className="ml-auto flex items-center gap-2">
                 <button className="flex items-center justify-center size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400">
@@ -597,27 +666,46 @@ export default function Atendimentos() {
               </div>
             </header>
 
-            {/* Barra de ações */}
+            {/* Barra de ações do ticket */}
             <div className="flex items-center justify-around gap-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 px-4 py-2 text-xs text-center">
-              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
-                <History className="w-4 h-4" />
-                <span>Reabrir Ticket</span>
-              </button>
+              {activeTicket.status === 'resolved' || activeTicket.status === 'closed' ? (
+                <button 
+                  onClick={() => updateTicketStatus(activeTicket.id, 'open')}
+                  className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24"
+                >
+                  <History className="w-4 h-4" />
+                  <span>Reabrir Ticket</span>
+                </button>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => updateTicketStatus(activeTicket.id, 'pending')}
+                    className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors p-1 rounded-md w-24"
+                    disabled={activeTicket.status === 'pending'}
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Pendente</span>
+                  </button>
+                  <button 
+                    onClick={() => updateTicketStatus(activeTicket.id, 'resolved')}
+                    className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-green-600 dark:hover:text-green-400 transition-colors p-1 rounded-md w-24"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Resolver</span>
+                  </button>
+                </>
+              )}
               <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
                 <Calendar className="w-4 h-4" />
                 <span>Agendamento</span>
               </button>
               <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
-                <Clock className="w-4 h-4" />
-                <span>Mover p/ Pendente</span>
-              </button>
-              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
-                <CheckCircle className="w-4 h-4" />
-                <span>Resolver Conversa</span>
-              </button>
-              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
                 <ArrowLeftRight className="w-4 h-4" />
-                <span>Transferir Conversa</span>
+                <span>Transferir</span>
+              </button>
+              <button className="flex flex-col items-center gap-1 text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary transition-colors p-1 rounded-md w-24">
+                <UserPlus className="w-4 h-4" />
+                <span>Atribuir</span>
               </button>
             </div>
 
@@ -681,7 +769,7 @@ export default function Atendimentos() {
           <div className="flex-1 flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/20">
             <div className="text-center max-w-md">
               <div className="w-32 h-32 bg-gradient-to-br from-primary/10 to-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <RefreshCw className="w-16 h-16 text-primary" />
+                <TicketIcon className="w-16 h-16 text-primary" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
                 Sistema de Tickets
@@ -690,40 +778,89 @@ export default function Atendimentos() {
                 Selecione um ticket da lista para iniciar o atendimento
               </p>
               <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Como funciona:</h4>
+                <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Sistema Automático:</h4>
                 <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1 text-left">
-                  <li>• Tickets são criados automaticamente via WhatsApp</li>
-                  <li>• Mensagens chegam em tempo real via WebSocket</li>
-                  <li>• Cada conversa é um ticket independente</li>
-                  <li>• Status: Pendente → Em Atendimento → Resolvido</li>
+                  <li>• ✅ Tickets criados automaticamente via WhatsApp</li>
+                  <li>• ⚡ Sincronização automática a cada 30 segundos</li>
+                  <li>• 🎯 Prioridade e categoria detectadas automaticamente</li>
+                  <li>• 📊 Métricas de SLA e tempo de resposta</li>
+                  <li>• 🔄 Status: Novo → Aberto → Pendente → Resolvido</li>
                 </ul>
+                
+                {/* Status da sincronização */}
+                <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-center gap-2 text-sm">
+                    {isSyncing ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                        <span className="text-primary">Sincronizando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        <span className="text-green-600 dark:text-green-400">Sistema ativo ({syncCount} sync)</span>
+                      </>
+                    )}
+                  </div>
+                  {lastSyncTime && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Última sincronização: {lastSyncTime.toLocaleTimeString('pt-BR')}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         )}
       </main>
 
-      {/* Painel lateral de informações do cliente */}
-      {activeConversation && (
+      {/* Painel lateral de informações do ticket */}
+      {activeTicket && (
         <aside className="w-full max-w-sm flex-col border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50 flex">
-          {/* Informações do cliente */}
+          {/* Informações do ticket */}
           <div className="p-6 text-center border-b border-gray-200 dark:border-gray-700">
             <div className="mx-auto bg-primary rounded-full size-24 mb-4 flex items-center justify-center text-white text-2xl font-bold">
-              {activeConversation.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
+              {activeTicket.contact?.name?.charAt(0)?.toUpperCase() || 'U'}
             </div>
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-              {activeConversation.contact?.name || 'Usuário'}
+              {activeTicket.contact?.name || 'Cliente'}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {activeConversation.contact?.phone_number || 'Sem telefone'}
+              {activeTicket.contact?.phone_number || 'Sem telefone'}
             </p>
-            <div className="mt-4 flex justify-center gap-2">
-              <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-900/50 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-700/10 dark:ring-blue-300/20">
-                VIP
-              </span>
-              <span className="inline-flex items-center rounded-md bg-green-50 dark:bg-green-900/50 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-300 ring-1 ring-inset ring-green-600/20 dark:ring-green-300/20">
-                Cliente Novo
-              </span>
+            <p className="text-sm font-mono text-gray-600 dark:text-gray-300 mt-1">
+              Ticket #{activeTicket.number}
+            </p>
+            
+            {/* Informações do ticket */}
+            <div className="mt-4 space-y-2">
+              <div className="flex justify-center gap-2">
+                <span className={cn("inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset", getStatusColor(activeTicket.status))}>
+                  {activeTicket.status === 'new' ? 'Novo' :
+                   activeTicket.status === 'open' ? 'Aberto' :
+                   activeTicket.status === 'pending' ? 'Pendente' :
+                   activeTicket.status === 'resolved' ? 'Resolvido' : 'Fechado'}
+                </span>
+                <span className={cn("inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset", getPriorityColor(activeTicket.priority))}>
+                  {activeTicket.priority === 'urgent' ? 'Urgente' : 
+                   activeTicket.priority === 'high' ? 'Alta' :
+                   activeTicket.priority === 'normal' ? 'Normal' : 'Baixa'}
+                </span>
+              </div>
+              
+              <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                <p>Categoria: {activeTicket.category === 'support' ? 'Suporte' :
+                              activeTicket.category === 'sales' ? 'Vendas' :
+                              activeTicket.category === 'billing' ? 'Cobrança' :
+                              activeTicket.category === 'technical' ? 'Técnico' : 'Outros'}</p>
+                <p>Criado: {formatTime(activeTicket.created_at)}</p>
+                {activeTicket.first_response_at && (
+                  <p>Primeira resposta: {formatTime(activeTicket.first_response_at)}</p>
+                )}
+                {activeTicket.resolved_at && (
+                  <p>Resolvido: {formatTime(activeTicket.resolved_at)}</p>
+                )}
+              </div>
             </div>
           </div>
 

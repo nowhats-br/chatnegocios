@@ -16,6 +16,13 @@ interface WebSocketMessage {
   requiresAck?: boolean;
   retryCount?: number;
   isRetry?: boolean;
+  sender_is_user?: boolean;
+  isNewConversation?: boolean;
+  ticketInfo?: {
+    shouldCreateTicket?: boolean;
+    priority?: string;
+    category?: string;
+  };
 }
 
 interface BatchedMessage {

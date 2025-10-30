@@ -2984,6 +2984,9 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             messageType
           });
 
+          // Verificar se é uma nova conversa para criar ticket automaticamente
+          const isNewConversation = !conversation.id;
+          
           // Notificar via WebSocket em tempo real
           const notifyResult = notifyUser(ownerUserId, 'new_message', {
             conversationId: conversation.id,
@@ -2993,7 +2996,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             messageId: key.id,
             content: messageContent,
             messageType: messageType,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            isNewConversation: isNewConversation,
+            ticketInfo: {
+              shouldCreateTicket: isNewConversation,
+              priority: isNewConversation ? 'normal' : undefined,
+              category: isNewConversation ? 'support' : undefined
+            }
           }, messageCorrelationId);
 
           if (notifyResult.success) {
